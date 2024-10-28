@@ -1,0 +1,23 @@
+<html>
+    <header>
+        <title>Bingo</title>
+        <script>
+            function connect() {
+                const socket = new WebSocket("ws:127.0.0.1:8000");
+                socket.onmessage = (msg) => {
+                    console.log(msg);
+                };
+                console.log(socket);
+                window.socket = socket;
+            }
+
+            function sendMessage() {
+                window.socket.send({ command: "HELLO", parameters: "" });
+            }
+        </script>
+    </header>
+    <body>
+        <button onclick="connect()">Connect</button>
+        <button onclick="sendMessage()">Send</button>
+    </body>
+</html>
