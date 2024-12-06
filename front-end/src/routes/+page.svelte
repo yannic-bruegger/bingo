@@ -1,2 +1,18 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<script>
+	import Card from "$lib/components/card.svelte";
+
+</script>
+
+<div>
+    <Card></Card>
+</div>
+
+
+
+<style>
+    :host {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+</style>
