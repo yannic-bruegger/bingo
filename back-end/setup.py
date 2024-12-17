@@ -72,7 +72,8 @@ async def echo(websocket):
                     if player == None: # Ist spieler noch nicht in der session füge ihn hinzu
                         session.players.add(Player(messageJson["name"], websocket))
                     await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
-                    websockets.broadcast(getPlayerSockets(session.players), "user joined")
+                    #websockets.broadcast(getPlayerSockets(session.players), "user joined")
+                    websockets.broadcast(getPlayerSockets(session.players), json.dumps({"type": "user_joined", "name": messageJson["name"]}))
 
                 elif event == "leave":
                     websockets.broadcast(session.players, "user left")
