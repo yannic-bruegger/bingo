@@ -57,7 +57,7 @@ async def echo(websocket):
     messageJson = json.loads(message)
 
 
-    if "session" not in messageJson: # Neue Session erstellen und Spieler hinzufügen
+    if "createsession" in messageJson: # Neue Session erstellen und Spieler hinzufügen
         newSession = Session()
         newSession.addplayer(Player(messageJson["name"], websocket))
         SESSIONS.add(newSession)
@@ -71,6 +71,7 @@ async def echo(websocket):
                     player = next((y for y in session.players if y == websocket), None) # finde spieler in session
                     if player == None: # Ist spieler noch nicht in der session füge ihn hinzu
                         session.players.add(Player(messageJson["name"], websocket))
+                    await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
                     websockets.broadcast(getPlayerSockets(session.players), "user joined")
 
                 elif event == "leave":
