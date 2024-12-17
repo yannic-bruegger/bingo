@@ -1,32 +1,6 @@
 <script lang="ts">
     const ratio = .7;
-    export const cells = $state([
-        { value: { id: 1, text: "Hallo" }, stamped: Math.random() > ratio, },
-        { value: { id: 2, text: "Werte" }, stamped: Math.random() > ratio, },
-        { value: { id: 3, text: "Hallo" }, stamped: Math.random() > ratio, },
-        { value: { id: 4, text: "Random" }, stamped: Math.random() > ratio, },
-        { value: { id: 5, text: "Werte" }, stamped: Math.random() > ratio, },
-        { value: { id: 6, text: "Hallo" }, stamped: Math.random() > ratio, },
-        { value: { id: 7, text: "Random" }, stamped: Math.random() > ratio, },
-        { value: { id: 8, text: "Werte" }, stamped: Math.random() > ratio, },
-        { value: { id: 9, text: "Hallo" }, stamped: Math.random() > ratio, },
-        { value: { id: 10, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 11, text: "Random" }, stamped: Math.random() > ratio, },
-        { value: { id: 12, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 13, text: "Random" }, stamped: Math.random() > ratio, },
-        { value: { id: 14, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 15, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 16, text: "Werte" }, stamped: Math.random() > ratio, },
-        { value: { id: 17, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 18, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 19, text: "Random" }, stamped: Math.random() > ratio, },
-        { value: { id: 20, text: "Werte" }, stamped: Math.random() > ratio, },
-        { value: { id: 21, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 22, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 23, text: "Random" }, stamped: Math.random() > ratio, },
-        { value: { id: 24, text: "Welt" }, stamped: Math.random() > ratio, },
-        { value: { id: 25, text: "Welt" }, stamped: Math.random() > ratio, },
-    ])
+    export const cells = $state([])
 
     let { type = 'full' } = $props();
 </script>

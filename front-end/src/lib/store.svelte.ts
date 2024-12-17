@@ -1,0 +1,1 @@
+export const webSocket = new WebSocket('ws://192.168.178.66:8765');

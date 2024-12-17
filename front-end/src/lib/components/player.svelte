@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Card from "./card.svelte";
 
-    let { name = 'SimonS' } = $props();
+    let { name } = $props();
 </script>
 
 <div class="player">
