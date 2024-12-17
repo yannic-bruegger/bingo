@@ -1,4 +1,6 @@
 import json
+import jsonpickle
+from json import JSONEncoder
 
 print('Bingo')
 import asyncio
@@ -72,7 +74,15 @@ async def echo(websocket):
                     if player == None: # Ist spieler noch nicht in der session füge ihn hinzu
                         session.players.add(Player(messageJson["name"], websocket))
                     await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
+                    temp_players_list = list()
+                    for i in session.players:
+                        temp_players_list.append(i.name)
+                    print(temp_players_list)
+                    #sampleJson = jsonpickle.encode(session.players)
+                    #print(sampleJson["name"])
+                    await websocket.send(json.dumps({"type": "joined_successfully", "players": json.dumps(temp_players_list) }))
                     #websockets.broadcast(getPlayerSockets(session.players), "user joined")
+                    #websockets.broadcast(getPlayerSockets(session.players), json.dumps({"players": temp_players_list}))
                     websockets.broadcast(getPlayerSockets(session.players), json.dumps({"type": "user_joined", "name": messageJson["name"]}))
 
                 elif event == "leave":
