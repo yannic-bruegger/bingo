@@ -24,7 +24,7 @@ A/E | Name | Next State
 A   | ``startGame`` |  |
 E   | ``player_joined`` |  |
 E   | ``player_left`` |  |
-E   | ``game_started`` | [JOINED](#state-started) |
+E   | ``game_started`` | [STARTED](#state-started) |
 
 #### State: ``STARTED``
 
