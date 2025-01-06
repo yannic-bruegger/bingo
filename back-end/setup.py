@@ -84,7 +84,7 @@ async def echo(websocket):
                     player = next((y for y in session.players if y == websocket), None) # finde spieler in session
                     if player == None: # Ist spieler noch nicht in der session füge ihn hinzu
                         session.players.add(Player(messageJson["name"], websocket))
-                    await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
+                    #await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
                     temp_players_list = list()
                     for i in session.players:
                         temp_players_list.append(i.name)
