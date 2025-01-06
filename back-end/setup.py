@@ -70,7 +70,7 @@ async def echo(websocket):
         newSession.addplayer(Player(messageJson["name"], websocket))
         SESSIONS.add(newSession)
         #await websocket.send(json.dumps({ "sessionId": newSession.id }))
-        await websocket.send(json.dumps({"sessionId": newSession.id, "type": "joined_successfully", "players": messageJson["name"]}))
+        await websocket.send(json.dumps({"sessionId": newSession.id, "type": "joined_successfully", "players": [messageJson["name"]]}))
     else: # Check ob Session existiert und dann Nachricht in die Session senden
         session = next((x for x in SESSIONS if x.id == messageJson["session"]), None)
         if session != None: # Wenn Session existiert
