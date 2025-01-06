@@ -4,69 +4,62 @@
 	import { Input } from '$lib/components/ui/input/index';
 	import { Button } from '$lib/components/ui/button/index';
 	import { Label } from '$lib/components/ui/label/index';
-	import { goto } from '$app/navigation';
 
-	import { webSocket } from '$lib/store.svelte';
-	import Header from '../stories/Header.svelte';
-	let code = '';
-	let username = '';
+	import { session, webSocket } from '$lib/store.svelte';
 
-    const pinSize = 6;
+	const pinSize = 6;
+	let isCreatingGame = false;
+
+	function checkCode() {
+		if (session.id.length !== pinSize) return;
+		joinGame(session.id);
+	}
 
 	function joinGame(sessionCode: string) {
+		if(isCreatingGame) return;
 		webSocket.send(
 			JSON.stringify({
 				session: sessionCode,
 				event: 'join',
-				name: username
+				name: session.username
 			})
 		);
-		webSocket.onmessage = (event) => {
-			const data = JSON.parse(event.data);
-			if (data.type === 'success') goto(`sessions/${sessionCode}`);
-		};
 	}
 
 	function createNewGame() {
+		isCreatingGame = true;
 		webSocket.send(
 			JSON.stringify({
 				createsession: '',
-				name: username
+				name: session.username
 			})
 		);
-
-		webSocket.onmessage = (event) => {
-			const data = JSON.parse(event.data);
-			if (data.sessionId !== undefined) {
-				const sessionId = data.sessionId;
-				goto(`sessions/${sessionId}`);
-			}
-		};
 	}
 
-	function checkCode() {
-		console.log(code);
-		if (code.length === pinSize) joinGame(code);
-	}
 </script>
 
-<div class="h-full flex items-center justify-center bg-slate-100">
+<div class="flex h-full items-center justify-center bg-slate-100">
 	<main>
 		<Card.Root>
 			<Card.Header>
 				<h1>B!NGO</h1>
 			</Card.Header>
 			<Card.Content class="flex flex-col gap-4">
-                <div class="flex w-full max-w-sm flex-col gap-1.5 mb-4">
-                    <Label for="username">Username</Label>
-                    <Input type="text" id="username" bind:value={username} /><br />
-                  </div>
-                  <div class="flex flex-row items-center w-full">
-					<hr class="flex-grow-0 w-full"/>
-					<p class="flex-grow-1 mx-4 text-sm text-nowrap">Join via game code</p>
-					<hr class="flex-grow-0 w-full"/>
+				<div class="mb-4 flex w-full max-w-sm flex-col gap-1.5">
+					<Label for="username">Username</Label>
+					<Input type="text" id="username" bind:value={session.username} required/><br />
 				</div>
-				<InputOTP.Root maxlength={pinSize} bind:value={code} onkeypress={checkCode} class="w-full flex justify-center">
+				<div class="flex w-full flex-row items-center">
+					<hr class="w-full flex-grow-0" />
+					<p class="flex-grow-1 mx-4 text-nowrap text-sm">Join via game code</p>
+					<hr class="w-full flex-grow-0" />
+				</div>
+				<InputOTP.Root
+					maxlength={pinSize}
+					onComplete={checkCode}
+					bind:value={session.id}
+					class="flex w-full justify-center"
+				>
 					{#snippet children({ cells })}
 						<InputOTP.Group>
 							{#each cells.slice(0, pinSize) as cell}
@@ -75,10 +68,10 @@
 						</InputOTP.Group>
 					{/snippet}
 				</InputOTP.Root>
-				<div class="flex flex-row items-center w-full">
-					<hr class="flex-grow-0 w-full"/>
-					<p class="flex-grow-1 mx-4 text-sm text-nowrap">or</p>
-					<hr class="flex-grow-0 w-full"/>
+				<div class="flex w-full flex-row items-center">
+					<hr class="w-full flex-grow-0" />
+					<p class="flex-grow-1 mx-4 text-nowrap text-sm">or</p>
+					<hr class="w-full flex-grow-0" />
 				</div>
 				<Button onclick={createNewGame} class="w-full">Create a new game</Button>
 				<br />
@@ -88,14 +81,6 @@
 </div>
 
 <style>
-	.layout {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-		background-color: #efefef;
-		gap: 2em;
-	}
 	main {
 		display: flex;
 		flex-direction: column;

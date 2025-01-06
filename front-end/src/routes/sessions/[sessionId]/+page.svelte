@@ -1,52 +1,42 @@
 <script lang="ts">
-  import { page } from '$app/stores';
+	import { page } from '$app/stores';
 	import Player from '$lib/components/player.svelte';
-	import { webSocket } from '$lib/store.svelte';
-  import * as Card from '$lib/components/ui/card/index';
+	import { session, webSocket } from '$lib/store.svelte';
+	import * as Card from '$lib/components/ui/card/index';
 	import { Button } from '$lib/components/ui/button';
-  const id = $page.params.sessionId
+	import { players } from '../../../lib/store.svelte';
+	const id = $page.params.sessionId;
 
-  const players: Array<Player> = $state([])
-
-  webSocket.onmessage = (message) => {
-    const data = JSON.parse(message.data)
-    switch(data.type) {
-      case "user_joined": 
-        console.log(data)
-        players.push(data.name)
-        console.log(players)
-        break;       
-    }
-  }
+	function startGame() {
+		webSocket.send(
+			JSON.stringify({
+				event: 'startGame',
+				session: session.id,
+				decksize: "5"
+			})
+		)
+	}
 </script>
 
-<div class="h-full flex items-center justify-center bg-slate-100">
+<div class="flex h-full items-center justify-center bg-slate-100">
 	<main>
 		<Card.Root>
 			<Card.Header>
-				<h1>Game ID: {id}</h1>
+				<h1>Game ID: <code class="bg-muted relative rounded px-[0.3rem] py-[0.2rem] font-mono text-sm font-semibold">{id}</code></h1>
 			</Card.Header>
 			<Card.Content class="flex flex-col gap-4">
-        {#each players as player}
-          <Player name={player}></Player>
-        {/each}
+				{#each players as player}
+					<Player name={player} isPlayer={player === session.username}></Player>
+				{/each}
 			</Card.Content>
-      <Card.Footer>
-        <Button class="w-full">Start</Button>
-      </Card.Footer>
+			<Card.Footer>
+				<Button class="w-full" onclick={startGame}>Start</Button>
+			</Card.Footer>
 		</Card.Root>
 	</main>
 </div>
 
 <style>
-	.layout {
-		display: flex;
-		flex-direction: row;
-		align-items: center;
-		justify-content: center;
-		background-color: #efefef;
-		gap: 2em;
-	}
 	main {
 		display: flex;
 		flex-direction: column;

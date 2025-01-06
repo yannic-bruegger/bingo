@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Card from "./card.svelte";
 
-    let { name } = $props();
+    let { name, isPlayer } = $props();
 </script>
 
 <div class="player">
@@ -9,7 +9,7 @@
         <Card type="preview"></Card>
     </div>
     <div class="details">
-        { name }
+        { name } {#if isPlayer} (you) {/if}
     </div>
 </div>
 
