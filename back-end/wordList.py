@@ -24,7 +24,7 @@ class WordList:
                 cellArray.append(Cell(False, currentWord))
                 seen.add(currentWord)
 
-        return Card(cellArray, 1, 5)
+        return Card(cellArray, random.randint(1, 10000), 5)
 
     def generateDeck(self, size):
         cards = []

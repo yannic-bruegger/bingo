@@ -2,7 +2,7 @@ import random
 
 class Session:
     def __init__(self):
-        self.id = str(random.randint(100, 999))
+        self.id = str(random.randint(100000, 999999))
         self.players = set()
 
 
