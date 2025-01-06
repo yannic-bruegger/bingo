@@ -84,7 +84,7 @@ async def echo(websocket):
                     player = next((y for y in session.players if y == websocket), None) # finde spieler in session
                     if player == None: # Ist spieler noch nicht in der session füge ihn hinzu
                         session.players.add(Player(messageJson["name"], websocket))
-                    await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
+                    #await websocket.send(json.dumps({"type": "success", "message": "successfully joined"}))
                     temp_players_list = list()
                     for i in session.players:
                         temp_players_list.append(i.name)
@@ -95,7 +95,8 @@ async def echo(websocket):
                     await websocket.send(json.dumps({"type": "joined_successfully", "players": temp_players_list}))
                     #websockets.broadcast(getPlayerSockets(session.players), "user joined")
                     #websockets.broadcast(getPlayerSockets(session.players), json.dumps({"players": temp_players_list}))
-                    websockets.broadcast(getPlayerSockets(session.players), json.dumps({"type": "user_joined", "name": messageJson["name"]}))
+                    tempFilteredPlayers = [player for player in session.players if player.name != messageJson["name"]]
+                    websockets.broadcast(getPlayerSockets(tempFilteredPlayers), json.dumps({"type": "user_joined", "name": messageJson["name"]}))
 
                 elif event == "leave":
                     websockets.broadcast(session.players, "user left")
