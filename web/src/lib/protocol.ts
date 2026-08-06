@@ -9,6 +9,14 @@ export const WS_PATH = '/ws';
 
 export type SessionStatus = 'lobby' | 'running' | 'finished';
 
+/**
+ * `race`    — a bingo is final, the order of winners is the result.
+ * `endless` — a bingo earns a point and a fresh card; everyone plays on.
+ */
+export type GameMode = 'race' | 'endless';
+
+export const GAME_MODES: GameMode[] = ['race', 'endless'];
+
 export type PublicPlayer = {
   id: string;
   name: string;
@@ -16,19 +24,37 @@ export type PublicPlayer = {
   connected: boolean;
   /** One boolean per cell of the player's own card — drives the mini previews. */
   stamps: boolean[];
-  /** Number of completed rows/columns/diagonals. */
+  /** Number of completed rows/columns/diagonals on the current card. */
   lines: number;
   hasBingo: boolean;
+  /** Bingos so far this round — only ever above 1 in endless mode. */
+  wins: number;
   /** ms since session start, or null. */
   bingoAt: number | null;
 };
 
+/** The list a round is being played with, as everyone in the room sees it. */
+export type ListInfo = {
+  id: string;
+  name: string;
+  count: number;
+  /** `shared` lists ship with the app, `custom` ones come from a player's browser. */
+  source: ListSource;
+};
+
+export type ListSource = 'shared' | 'custom';
+
+/** What a host sends when picking a list: an existing one, or words of their own. */
+export type ListRef =
+  | { kind: 'shared'; id: string }
+  | { kind: 'custom'; id: string; name: string; words: string[] };
+
 export type SessionSnapshot = {
   code: string;
   status: SessionStatus;
+  mode: GameMode;
   size: number;
-  listId: string;
-  listName: string;
+  list: ListInfo;
   hostId: string;
   players: PublicPlayer[];
   /** Player ids in the order they shouted bingo. */
@@ -44,14 +70,14 @@ export type SelfState = {
   freeIndex: number;
 };
 
-export type WordListInfo = { id: string; name: string; count: number };
+export type WordListInfo = ListInfo;
 
 /* ------------------------------- client → server ------------------------------- */
 
 export type ClientMessage =
-  | { t: 'create'; name: string; listId: string; size: number }
+  | { t: 'create'; name: string; list?: ListRef; size?: number; mode?: GameMode }
   | { t: 'join'; code: string; name: string; playerId?: string }
-  | { t: 'config'; listId?: string; size?: number }
+  | { t: 'config'; list?: ListRef; size?: number; mode?: GameMode }
   | { t: 'start' }
   | { t: 'stop' }
   | { t: 'reset' }
@@ -81,11 +107,22 @@ export type ErrorCode =
   | 'not_host'
   | 'bad_request'
   | 'session_full'
-  | 'already_running';
+  | 'already_running'
+  | 'bad_list';
 
 export const MAX_PLAYERS = 24;
+/** A list needs at least this many words to fill the smallest card. */
+export const MIN_WORDS = 8;
+export const MAX_WORDS = 300;
+export const MAX_WORD_LENGTH = 60;
+export const MAX_LIST_NAME_LENGTH = 30;
 export const CODE_LENGTH = 6;
 export const SIZES = [3, 4, 5] as const;
+
+/** How many words a card of `size` needs (the free centre costs nothing). */
+export function wordsNeeded(size: number): number {
+  return size * size - (size % 2 === 1 ? 1 : 0);
+}
 
 /** Index of the free space for a card of `size`, or -1 when there is none. */
 export function freeIndexFor(size: number): number {

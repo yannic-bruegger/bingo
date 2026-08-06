@@ -12,7 +12,7 @@ import { connection, useBingo } from '@/lib/useBingo';
 
 export default function HomePage() {
   const router = useRouter();
-  const { pending, formError, lists, session } = useBingo();
+  const { pending, formError, session } = useBingo();
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
 
@@ -33,7 +33,7 @@ export default function HomePage() {
 
   const create = () => {
     if (!ready) return;
-    connection.create(name.trim(), lists[0]?.id ?? 'th-koeln', 5, enter);
+    connection.create(name.trim(), enter);
   };
 
   return (

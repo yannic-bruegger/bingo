@@ -11,6 +11,8 @@
 import {
   WS_PATH,
   type ClientMessage,
+  type GameMode,
+  type ListRef,
   type ServerMessage,
   type SelfState,
   type SessionSnapshot,
@@ -38,7 +40,7 @@ export type BingoState = {
 };
 
 type Intent =
-  | { t: 'create'; name: string; listId: string; size: number }
+  | { t: 'create'; name: string }
   | { t: 'join'; code: string; name: string; playerId?: string };
 
 const NAME_KEY = 'bingo:name';
@@ -255,9 +257,19 @@ class Connection {
       case 'player_left':
         this.notify('info', `${message.name} hat die Runde verlassen`);
         break;
-      case 'player_bingo':
-        this.notify('bingo', message.playerId === me ? 'BINGO! Du hast es!' : `BINGO für ${message.name}`);
+      case 'player_bingo': {
+        // The snapshot lands before the event, so the fresh count is already in.
+        const player = this.state.session?.players.find((p) => p.id === message.playerId);
+        const endless = this.state.session?.mode === 'endless';
+        const tally = endless && player ? ` · ${player.wins}` : '';
+        this.notify(
+          'bingo',
+          message.playerId === me
+            ? `BINGO! Du hast es!${tally}`
+            : `BINGO für ${message.name}${tally}`,
+        );
         break;
+      }
       case 'game_started':
         this.notify('info', 'Los geht’s — viel Glück!');
         break;
@@ -274,10 +286,10 @@ class Connection {
 
   /* --------------------------------- actions -------------------------------- */
 
-  create(name: string, listId: string, size: number, onEnter: (code: string) => void) {
+  create(name: string, onEnter: (code: string) => void) {
     rememberName(name);
     this.onEnter = onEnter;
-    this.intent = { t: 'create', name, listId, size };
+    this.intent = { t: 'create', name };
     this.patch({ pending: true, formError: null });
     this.send(this.intent);
   }
@@ -300,7 +312,7 @@ class Connection {
     return true;
   }
 
-  configure(patch: { listId?: string; size?: number }) {
+  configure(patch: { list?: ListRef; size?: number; mode?: GameMode }) {
     this.send({ t: 'config', ...patch });
   }
 

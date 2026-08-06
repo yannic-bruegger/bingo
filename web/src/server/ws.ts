@@ -30,6 +30,7 @@ const LISTS: WordListInfo[] = WORD_LISTS.map((l) => ({
   id: l.id,
   name: l.name,
   count: l.words.length,
+  source: 'shared',
 }));
 
 export function attachBingoServer(server: HttpServer): WebSocketServer {
@@ -135,8 +136,9 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
     if (message.t === 'create') {
       const result = engine.createSession(
         cleanName(message.name),
-        String(message.listId ?? ''),
-        Number(message.size),
+        message.list,
+        message.size,
+        message.mode ?? 'race',
       );
       if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
       bind(socket, result.session, result.player.id);
@@ -170,8 +172,9 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
     switch (message.t) {
       case 'config': {
         const result = engine.configure(session, playerId, {
-          listId: typeof message.listId === 'string' ? message.listId : undefined,
+          list: message.list,
           size: typeof message.size === 'number' ? message.size : undefined,
+          mode: message.mode,
         });
         if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
         return broadcast(session.code);

@@ -7,17 +7,29 @@
 
 import {
   CODE_LENGTH,
+  MAX_LIST_NAME_LENGTH,
   MAX_PLAYERS,
+  MAX_WORDS,
+  MAX_WORD_LENGTH,
+  MIN_WORDS,
   SIZES,
+  GAME_MODES,
   completedLines,
   freeIndexFor,
+  wordsNeeded,
   type ErrorCode,
+  type GameMode,
+  type ListInfo,
+  type ListRef,
   type PublicPlayer,
   type SelfState,
   type SessionSnapshot,
   type SessionStatus,
 } from '../lib/protocol.ts';
 import { DEFAULT_LIST_ID, getList } from './wordlists.ts';
+
+/** A list as it lives inside a session — resolved, validated, self-contained. */
+export type SessionList = ListInfo & { words: string[]; freeLabel: string };
 
 export type Player = {
   id: string;
@@ -27,14 +39,16 @@ export type Player = {
   stamps: boolean[];
   hasBingo: boolean;
   bingoAt: number | null;
+  wins: number;
   disconnectedAt: number | null;
 };
 
 export type Session = {
   code: string;
   status: SessionStatus;
+  mode: GameMode;
   size: number;
-  listId: string;
+  list: SessionList;
   hostId: string;
   /** Join order — keeps the player list stable across renders. */
   order: string[];
@@ -60,19 +74,34 @@ export class Engine {
 
   /* --------------------------------- lifecycle -------------------------------- */
 
-  createSession(hostName: string, listId: string, size: number): Result<{ session: Session; player: Player }> {
+  createSession(
+    hostName: string,
+    listRef: ListRef | undefined,
+    size: number | undefined,
+    mode: GameMode = 'race',
+  ): Result<{ session: Session; player: Player }> {
     const name = cleanName(hostName);
     if (!name) return fail('bad_request', 'Bitte gib einen Namen ein.');
-    if (!getList(listId)) return fail('bad_request', 'Unbekannte Wortliste.');
-    if (!isValidSize(size)) return fail('bad_request', 'Ungültige Kartengröße.');
+
+    const cardSize = size ?? 5;
+    if (!isValidSize(cardSize)) return fail('bad_request', 'Ungültige Kartengröße.');
+
+    if (!isValidMode(mode)) return fail('bad_request', 'Unbekannter Spielmodus.');
+
+    const resolved = resolveList(listRef ?? { kind: 'shared', id: DEFAULT_LIST_ID });
+    if (!resolved.ok) return resolved;
+    if (resolved.list.count < wordsNeeded(cardSize)) {
+      return fail('bad_list', tooFewWords(resolved.list.count, cardSize));
+    }
 
     const code = this.freshCode();
     const player = newPlayer(name);
     const session: Session = {
       code,
       status: 'lobby',
-      size,
-      listId,
+      mode,
+      size: cardSize,
+      list: resolved.list,
       hostId: player.id,
       order: [player.id],
       players: new Map([[player.id, player]]),
@@ -144,17 +173,42 @@ export class Engine {
 
   /* ---------------------------------- actions --------------------------------- */
 
-  configure(session: Session, playerId: string, patch: { listId?: string; size?: number }): Result<object> {
+  configure(
+    session: Session,
+    playerId: string,
+    patch: { list?: ListRef; size?: number; mode?: GameMode },
+  ): Result<object> {
     if (session.hostId !== playerId) return fail('not_host', 'Nur der Host kann das ändern.');
     if (session.status !== 'lobby') return fail('already_running', 'Das Spiel läuft bereits.');
-    if (patch.listId !== undefined) {
-      if (!getList(patch.listId)) return fail('bad_request', 'Unbekannte Wortliste.');
-      session.listId = patch.listId;
+
+    if (patch.mode !== undefined) {
+      if (!isValidMode(patch.mode)) return fail('bad_request', 'Unbekannter Spielmodus.');
+      session.mode = patch.mode;
     }
+
+    let list = session.list;
+    if (patch.list !== undefined) {
+      const resolved = resolveList(patch.list);
+      if (!resolved.ok) return resolved;
+      list = resolved.list;
+    }
+
+    let size = session.size;
     if (patch.size !== undefined) {
       if (!isValidSize(patch.size)) return fail('bad_request', 'Ungültige Kartengröße.');
-      session.size = patch.size;
+      size = patch.size;
+    } else if (list.count < wordsNeeded(size)) {
+      // Picking a shorter list shouldn't dead-end — fall back to the biggest
+      // card it can still fill. An explicit size choice stays strict.
+      const fits = SIZES.filter((option) => list.count >= wordsNeeded(option));
+      if (fits.length > 0) size = Math.max(...fits);
     }
+
+    // List and size only make sense together — reject the combination, not one half.
+    if (list.count < wordsNeeded(size)) return fail('bad_list', tooFewWords(list.count, size));
+
+    session.list = list;
+    session.size = size;
     touch(session);
     return { ok: true };
   }
@@ -163,10 +217,8 @@ export class Engine {
     if (session.hostId !== playerId) return fail('not_host', 'Nur der Host kann starten.');
     if (session.status === 'running') return fail('already_running', 'Das Spiel läuft bereits.');
 
-    const list = getList(session.listId);
-    const needed = session.size * session.size - (freeIndexFor(session.size) >= 0 ? 1 : 0);
-    if (!list || list.words.length < needed) {
-      return fail('bad_request', 'Die Wortliste hat zu wenige Begriffe für diese Kartengröße.');
+    if (session.list.count < wordsNeeded(session.size)) {
+      return fail('bad_list', tooFewWords(session.list.count, session.size));
     }
 
     session.status = 'running';
@@ -174,7 +226,9 @@ export class Engine {
     session.winners = [];
     for (const id of session.order) {
       const player = session.players.get(id);
-      if (player) dealTo(session, player);
+      if (!player) continue;
+      player.wins = 0;
+      dealTo(session, player);
     }
     touch(session);
     return { ok: true };
@@ -199,12 +253,17 @@ export class Engine {
       player.stamps = [];
       player.hasBingo = false;
       player.bingoAt = null;
+      player.wins = 0;
     }
     touch(session);
     return { ok: true };
   }
 
-  /** Returns `bingo: true` exactly once per player and round. */
+  /**
+   * Returns `bingo: true` on the stamp that completes a line. In endless mode
+   * that also banks a win and deals the player a fresh card straight away, so
+   * everyone else can keep working on theirs.
+   */
   stamp(session: Session, playerId: string, index: number, on: boolean): Result<{ bingo: boolean }> {
     const player = session.players.get(playerId);
     if (!player || !player.card) return fail('bad_request', 'Du hast noch keine Karte.');
@@ -221,7 +280,12 @@ export class Engine {
 
     if (player.hasBingo && !hadBingo) {
       player.bingoAt = Date.now() - (session.startedAt ?? Date.now());
-      if (!session.winners.includes(player.id)) session.winners.push(player.id);
+      player.wins += 1;
+      if (session.mode === 'endless') {
+        dealTo(session, player);
+      } else if (!session.winners.includes(player.id)) {
+        session.winners.push(player.id);
+      }
       touch(session);
       return { ok: true, bingo: true };
     }
@@ -236,13 +300,12 @@ export class Engine {
   /* -------------------------------- projections ------------------------------- */
 
   snapshot(session: Session): SessionSnapshot {
-    const list = getList(session.listId);
     return {
       code: session.code,
       status: session.status,
+      mode: session.mode,
       size: session.size,
-      listId: session.listId,
-      listName: list?.name ?? session.listId,
+      list: { id: session.list.id, name: session.list.name, count: session.list.count, source: session.list.source },
       hostId: session.hostId,
       winners: [...session.winners],
       startedAt: session.startedAt,
@@ -258,6 +321,7 @@ export class Engine {
           lines: p.card ? completedLines(p.stamps, session.size).length : 0,
           hasBingo: p.hasBingo,
           bingoAt: p.bingoAt,
+          wins: p.wins,
         })),
     };
   }
@@ -327,14 +391,13 @@ function newPlayer(name: string): Player {
     stamps: [],
     hasBingo: false,
     bingoAt: null,
+    wins: 0,
     disconnectedAt: null,
   };
 }
 
 function dealTo(session: Session, player: Player): void {
-  const list = getList(session.listId);
-  if (!list) return;
-  player.card = buildCard(list.words, session.size);
+  player.card = buildCard(session.list.words, session.size, session.list.freeLabel);
   player.stamps = new Array(session.size * session.size).fill(false);
   player.hasBingo = false;
   player.bingoAt = null;
@@ -343,15 +406,89 @@ function dealTo(session: Session, player: Player): void {
 }
 
 /** A fresh shuffle per player, so no two cards are alike. */
-export function buildCard(words: string[], size: number): string[] {
+export function buildCard(words: string[], size: number, freeLabel = FREE_CELL): string[] {
   const free = freeIndexFor(size);
-  const needed = size * size - (free >= 0 ? 1 : 0);
-  const picked = shuffle(words).slice(0, needed);
+  const picked = shuffle(words).slice(0, wordsNeeded(size));
   if (free < 0) return picked;
-  return [...picked.slice(0, free), FREE_CELL, ...picked.slice(free)];
+  return [...picked.slice(0, free), freeLabel, ...picked.slice(free)];
 }
 
 export const FREE_CELL = '★';
+
+/* ----------------------------------- lists ----------------------------------- */
+
+function tooFewWords(count: number, size: number): string {
+  return `Die Liste hat ${count} Begriffe, für ${size} × ${size} werden ${wordsNeeded(size)} gebraucht.`;
+}
+
+/**
+ * Turns whatever a host picked into a self-contained list. Custom lists carry
+ * their words with them, so a round never depends on the creator staying online.
+ */
+export function resolveList(ref: ListRef): Result<{ list: SessionList }> {
+  if (!ref || typeof ref !== 'object') return fail('bad_list', 'Keine Wortliste ausgewählt.');
+
+  if (ref.kind === 'shared') {
+    const list = getList(String(ref.id));
+    if (!list) return fail('bad_list', 'Unbekannte Wortliste.');
+    return {
+      ok: true,
+      list: {
+        id: list.id,
+        name: list.name,
+        count: list.words.length,
+        source: 'shared',
+        words: list.words,
+        freeLabel: list.freeLabel,
+      },
+    };
+  }
+
+  if (ref.kind === 'custom') {
+    const name = cleanListName(ref.name);
+    if (!name) return fail('bad_list', 'Die Liste braucht einen Namen.');
+    const words = normalizeWords(ref.words);
+    if (words.length < MIN_WORDS) {
+      return fail('bad_list', `Die Liste braucht mindestens ${MIN_WORDS} Begriffe.`);
+    }
+    return {
+      ok: true,
+      list: {
+        id: typeof ref.id === 'string' && ref.id ? ref.id.slice(0, 64) : `custom:${randomId()}`,
+        name,
+        count: words.length,
+        source: 'custom',
+        words,
+        freeLabel: FREE_CELL,
+      },
+    };
+  }
+
+  return fail('bad_list', 'Unbekannte Wortliste.');
+}
+
+/** Trims, drops blanks and duplicates, and caps length — order is preserved. */
+export function normalizeWords(words: unknown): string[] {
+  if (!Array.isArray(words)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const word of words) {
+    if (typeof word !== 'string') continue;
+    const clean = word.replace(/\s+/g, ' ').trim().slice(0, MAX_WORD_LENGTH);
+    if (!clean) continue;
+    const key = clean.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+    if (out.length >= MAX_WORDS) break;
+  }
+  return out;
+}
+
+export function cleanListName(name: unknown): string {
+  if (typeof name !== 'string') return '';
+  return name.replace(/\s+/g, ' ').trim().slice(0, MAX_LIST_NAME_LENGTH);
+}
 
 function shuffle<T>(input: readonly T[]): T[] {
   const out = [...input];
@@ -384,6 +521,10 @@ export function normalizeCode(code: unknown): string {
 
 export function isValidSize(size: unknown): size is number {
   return typeof size === 'number' && (SIZES as readonly number[]).includes(size);
+}
+
+export function isValidMode(mode: unknown): mode is GameMode {
+  return typeof mode === 'string' && (GAME_MODES as string[]).includes(mode);
 }
 
 function randomCode(): string {

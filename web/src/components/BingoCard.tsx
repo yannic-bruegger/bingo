@@ -7,6 +7,8 @@ import { cx } from './ui';
 
 /** Long phrases get a smaller type size so they never get clipped. */
 function fit(word: string): number {
+  if (word.length > 40) return 0.56;
+  if (word.length > 32) return 0.63;
   if (word.length > 26) return 0.68;
   if (word.length > 18) return 0.79;
   if (word.length > 12) return 0.89;

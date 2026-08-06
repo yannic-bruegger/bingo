@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { freeIndexFor } from '../lib/protocol.ts';
-import { Engine, buildCard } from './engine.ts';
+import { MIN_WORDS, freeIndexFor, type ListRef } from '../lib/protocol.ts';
+import { Engine, buildCard, normalizeWords, resolveList } from './engine.ts';
 import { WORD_LISTS } from './wordlists.ts';
 
-const LIST = WORD_LISTS[0].id;
+const LIST: ListRef = { kind: 'shared', id: WORD_LISTS[0].id };
+
+/** A throwaway custom list with `count` distinct words. */
+function customList(count: number, name = 'Meine Liste'): ListRef {
+  return {
+    kind: 'custom',
+    id: 'custom:test',
+    name,
+    words: Array.from({ length: count }, (_, i) => `Begriff ${i + 1}`),
+  };
+}
 
 function started(size = 5, players = ['Host', 'Gast']) {
   const engine = new Engine();
@@ -180,7 +190,7 @@ describe('rounds', () => {
     const snapshot = engine.snapshot(session);
     assert.equal(snapshot.players.length, 2);
     assert.equal(snapshot.players[0].isHost, true);
-    assert.equal(JSON.stringify(snapshot).includes('Vorlesung'), false);
+    assert.equal(JSON.stringify(snapshot).includes('Polizei'), false);
 
     const self = engine.selfState(session, session.players.get(hostId)!);
     assert.equal(self.card?.length, 25);
@@ -196,5 +206,103 @@ describe('rounds', () => {
 
     engine.sweep(Date.now() + 20 * 60 * 1000);
     assert.equal(engine.get(session.code), undefined);
+  });
+});
+
+describe('word lists', () => {
+  it('puts the shared list\u2019s own label in the free centre', () => {
+    const { session } = started(5, ['Host']);
+    const card = [...session.players.values()][0].card!;
+    assert.equal(card[freeIndexFor(5)], WORD_LISTS[0].freeLabel);
+  });
+
+  it('plays a round with a list the host supplied', () => {
+    const engine = new Engine();
+    const created = engine.createSession('Host', customList(30, ' Meine  Liste '), 5);
+    assert.ok(created.ok);
+    assert.equal(created.session.list.source, 'custom');
+    assert.equal(created.session.list.name, 'Meine Liste');
+    assert.equal(created.session.list.count, 30);
+
+    assert.ok(engine.start(created.session, created.player.id).ok);
+    const card = created.session.players.get(created.player.id)!.card!;
+    assert.equal(card.length, 25);
+    assert.ok(card.every((word, index) => index === 12 || word.startsWith('Begriff')));
+
+    // Custom lists are private to their author, so the snapshot only names them.
+    const snapshot = engine.snapshot(created.session);
+    assert.equal(snapshot.list.name, 'Meine Liste');
+    assert.equal(JSON.stringify(snapshot).includes('Begriff 1'), false);
+  });
+
+  it('keeps the words even after the round is reset', () => {
+    const engine = new Engine();
+    const created = engine.createSession('Host', customList(30), 5);
+    assert.ok(created.ok);
+    assert.ok(engine.start(created.session, created.player.id).ok);
+    assert.ok(engine.reset(created.session, created.player.id).ok);
+    assert.ok(engine.start(created.session, created.player.id).ok);
+    assert.equal(created.session.players.get(created.player.id)!.card!.length, 25);
+  });
+
+  it('rejects lists that are too small, unnamed or unknown', () => {
+    const engine = new Engine();
+    const tooSmall = engine.createSession('Host', customList(MIN_WORDS - 1), 3);
+    assert.equal(tooSmall.ok, false);
+    assert.equal(tooSmall.ok === false && tooSmall.code, 'bad_list');
+
+    const unnamed = engine.createSession('Host', customList(30, '   '), 5);
+    assert.equal(unnamed.ok, false);
+
+    const unknown = engine.createSession('Host', { kind: 'shared', id: 'nope' }, 5);
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.ok === false && unknown.code, 'bad_list');
+  });
+
+  it('shrinks the card when a shorter list is picked on its own', () => {
+    const engine = new Engine();
+    const created = engine.createSession('Host', LIST, 5);
+    assert.ok(created.ok);
+
+    assert.ok(engine.configure(created.session, created.player.id, { list: customList(10) }).ok);
+    assert.equal(created.session.size, 3);
+    assert.equal(created.session.list.count, 10);
+
+    // Going back to a long list leaves the size alone — it already fits.
+    assert.ok(engine.configure(created.session, created.player.id, { list: LIST }).ok);
+    assert.equal(created.session.size, 3);
+  });
+
+  it('refuses a size the current list cannot fill, and the list stays put', () => {
+    const engine = new Engine();
+    const created = engine.createSession('Host', customList(10), 3);
+    assert.ok(created.ok);
+
+    const tooBig = engine.configure(created.session, created.player.id, { size: 5 });
+    assert.equal(tooBig.ok, false);
+    assert.equal(tooBig.ok === false && tooBig.code, 'bad_list');
+    assert.equal(created.session.size, 3);
+
+    // Swapping list and size together is fine when the pair works out.
+    assert.ok(
+      engine.configure(created.session, created.player.id, { list: customList(24), size: 5 }).ok,
+    );
+    assert.equal(created.session.size, 5);
+    assert.equal(created.session.list.count, 24);
+  });
+
+  it('cleans up words: trims, drops blanks and duplicates, caps length', () => {
+    const words = normalizeWords(['  Ein  Wort ', '', '   ', 'ein wort', 'Zwei', 'x'.repeat(100)]);
+    assert.deepEqual(words.slice(0, 2), ['Ein Wort', 'Zwei']);
+    assert.equal(words.length, 3);
+    assert.equal(words[2].length, 60);
+  });
+
+  it('resolves shared lists without copying them into the session', () => {
+    const shared = resolveList({ kind: 'shared', id: WORD_LISTS[0].id });
+    assert.ok(shared.ok);
+    assert.equal(shared.list.source, 'shared');
+    assert.equal(shared.list.count, WORD_LISTS[0].words.length);
+    assert.equal(shared.list.freeLabel, WORD_LISTS[0].freeLabel);
   });
 });

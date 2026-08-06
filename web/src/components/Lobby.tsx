@@ -2,8 +2,15 @@
 
 import { useState } from 'react';
 
-import { SIZES, type SelfState, type SessionSnapshot } from '@/lib/protocol';
+import {
+  SIZES,
+  wordsNeeded,
+  type GameMode,
+  type SelfState,
+  type SessionSnapshot,
+} from '@/lib/protocol';
 import { connection, useBingo } from '@/lib/useBingo';
+import { ListPicker, SourceTag } from './ListPicker';
 import { PlayerList } from './PlayerList';
 import { RoomShell } from './Room';
 import { Button, Field, Segmented } from './ui';
@@ -12,7 +19,7 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
   const { lists } = useBingo();
   const isHost = session.hostId === self.playerId;
   const [copied, setCopied] = useState(false);
-  const activeList = lists.find((l) => l.id === session.listId);
+  const enough = session.list.count >= wordsNeeded(session.size);
 
   const share = async () => {
     const url = `${window.location.origin}/s/${session.code}`;
@@ -61,15 +68,31 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
         {isHost ? (
           <section className="flex flex-col gap-5">
             <Field label="Wortliste">
-              <Segmented
-                columns={2}
-                value={session.listId}
-                onChange={(listId) => connection.configure({ listId })}
-                options={lists.map((list) => ({
-                  value: list.id,
-                  label: list.name,
-                  hint: `${list.count} Begriffe`,
-                }))}
+              <ListPicker
+                shared={lists}
+                activeId={session.list.id}
+                size={session.size}
+                onPick={(list) => connection.configure({ list })}
+              />
+            </Field>
+
+            <Field label="Modus">
+              <Segmented<GameMode>
+                columns={1}
+                value={session.mode}
+                onChange={(mode) => connection.configure({ mode })}
+                options={[
+                  {
+                    value: 'race',
+                    label: 'Wettlauf',
+                    hint: 'Wer zuerst eine Reihe voll hat, steht oben',
+                  },
+                  {
+                    value: 'endless',
+                    label: 'Endlos',
+                    hint: 'Bingo zählt einen Punkt und bringt sofort eine neue Karte',
+                  },
+                ]}
               />
             </Field>
 
@@ -80,17 +103,24 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
                 options={SIZES.map((size) => ({
                   value: size,
                   label: `${size} × ${size}`,
-                  hint: `${size * size - (size % 2 ? 1 : 0)} Wörter`,
+                  hint: `${wordsNeeded(size)} Wörter`,
                 }))}
               />
             </Field>
 
-            <Button onClick={() => connection.start()}>Spiel starten</Button>
+            <Button onClick={() => connection.start()} disabled={!enough}>
+              Spiel starten
+            </Button>
           </section>
         ) : (
           <section className="rounded-2xl border border-dashed border-line p-5 text-center">
-            <p className="text-sm text-muted">
-              {activeList ? `${activeList.name} · ${session.size} × ${session.size}` : 'Bereit.'}
+            <p className="flex items-center justify-center gap-1.5 text-sm text-muted">
+              <span>{session.list.name}</span>
+              <SourceTag source={session.list.source} />
+              <span>
+                · {session.size} × {session.size} ·{' '}
+                {session.mode === 'endless' ? 'Endlos' : 'Wettlauf'}
+              </span>
             </p>
             <p className="mt-1 text-sm text-ink">Warten auf den Host …</p>
           </section>
