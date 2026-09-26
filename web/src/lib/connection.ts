@@ -48,6 +48,8 @@ const seatKey = (code: string) => `bingo:seat:${code}`;
 const NOTICE_MS = 4000;
 const MAX_BACKOFF_MS = 8000;
 const HANDSHAKE_TIMEOUT_MS = 6000;
+/** How long a socket gets to answer a ping after the app wakes up. */
+const PROBE_TIMEOUT_MS = 2500;
 
 const INITIAL: BingoState = {
   status: 'connecting',
@@ -96,6 +98,19 @@ function forgetSeat(code: string) {
   }
 }
 
+function withStamps(
+  session: SessionSnapshot,
+  playerId: string,
+  stamps: ReadonlyMap<number, boolean>,
+): SessionSnapshot {
+  return {
+    ...session,
+    players: session.players.map((p) =>
+      p.id === playerId ? { ...p, stamps: p.stamps.map((s, i) => stamps.get(i) ?? s) } : p,
+    ),
+  };
+}
+
 class Connection {
   private ws: WebSocket | null = null;
   private listeners = new Set<() => void>();
@@ -103,6 +118,16 @@ class Connection {
   private intent: Intent | null = null;
   private retries = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private probeTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleBound = false;
+  /**
+   * Stamps the server has not confirmed yet, by cell index. They survive a
+   * dropped socket and are sent again once the seat is re-taken — but only for
+   * the card they were made on (endless mode deals a new one after a bingo).
+   */
+  private pendingStamps = new Map<number, boolean>();
+  private pendingCard: string | null = null;
+  private resendOnSync = false;
   private noticeSeq = 0;
   /** Called once after a create/join succeeds — used to route to the room. */
   private onEnter: ((code: string) => void) | null = null;
@@ -122,6 +147,7 @@ class Connection {
 
   private open() {
     if (typeof window === 'undefined') return;
+    this.bindLifecycle();
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -142,10 +168,16 @@ class Connection {
       this.retries = 0;
       this.patch({ status: 'online' });
       // Re-establish whatever we were doing before the connection dropped.
-      if (this.intent) this.send(this.intent);
+      if (this.intent) {
+        this.resendOnSync = this.intent.t === 'join';
+        this.send(this.intent);
+      }
     };
 
     ws.onmessage = (event) => {
+      if (this.ws !== ws) return;
+      // Anything arriving proves the socket is alive, not just a pong.
+      this.clearProbe();
       let message: ServerMessage;
       try {
         message = JSON.parse(event.data as string) as ServerMessage;
@@ -157,6 +189,8 @@ class Connection {
 
     ws.onclose = () => {
       clearTimeout(handshake);
+      if (this.ws !== ws) return;
+      this.clearProbe();
       this.ws = null;
       this.patch({ status: 'offline' });
       this.scheduleReconnect();
@@ -175,6 +209,63 @@ class Connection {
       this.reconnectTimer = null;
       this.open();
     }, delay);
+  }
+
+  /**
+   * Phones freeze a backgrounded app and silently kill its socket — iOS in
+   * particular hands back one that still claims to be OPEN but never delivers
+   * anything again. So whenever the app comes back, check instead of trusting.
+   */
+  private bindLifecycle() {
+    if (this.lifecycleBound) return;
+    this.lifecycleBound = true;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') this.wake();
+    });
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) this.wake();
+    });
+    window.addEventListener('online', () => this.wake());
+  }
+
+  private wake() {
+    // Coming back is not a failure: skip whatever backoff piled up meanwhile.
+    this.retries = 0;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    const ws = this.ws;
+    if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
+      this.abandon();
+      return;
+    }
+    if (ws.readyState !== WebSocket.OPEN || this.probeTimer) return;
+
+    ws.send(JSON.stringify({ t: 'ping' } satisfies ClientMessage));
+    this.probeTimer = setTimeout(() => {
+      this.probeTimer = null;
+      if (this.ws === ws) this.abandon();
+    }, PROBE_TIMEOUT_MS);
+  }
+
+  /** Drop the current socket without waiting for its close — a dead one never sends it. */
+  private abandon() {
+    this.clearProbe();
+    const ws = this.ws;
+    this.ws = null;
+    if (ws) {
+      ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null;
+      ws.close();
+    }
+    this.open();
+  }
+
+  private clearProbe() {
+    if (!this.probeTimer) return;
+    clearTimeout(this.probeTimer);
+    this.probeTimer = null;
   }
 
   private send(message: ClientMessage) {
@@ -196,6 +287,7 @@ class Connection {
 
       case 'sync': {
         const first = this.state.session?.code !== message.session.code;
+        if (first) this.clearPendingStamps();
         rememberSeat(message.session.code, message.self.playerId);
         this.intent = {
           t: 'join',
@@ -204,7 +296,7 @@ class Connection {
           playerId: message.self.playerId,
         };
         this.patch({
-          session: message.session,
+          session: this.reconcileStamps(message),
           self: message.self,
           status: 'online',
           pending: false,
@@ -227,6 +319,7 @@ class Connection {
           // The round is gone (server restart, or it was swept). Don't leave the
           // player staring at a board that no longer exists.
           forgetSeat(this.state.session.code);
+          this.clearPendingStamps();
           this.intent = null;
           this.patch({
             session: null,
@@ -239,6 +332,8 @@ class Connection {
           this.intent = null;
           this.patch({ pending: false, formError: message.message });
         } else {
+          // A rejected stamp must not be replayed on the next reconnect.
+          this.clearPendingStamps();
           this.notify('error', message.message);
         }
         break;
@@ -277,6 +372,39 @@ class Connection {
         this.notify('info', 'Runde beendet');
         break;
     }
+  }
+
+  /**
+   * Settle unconfirmed stamps against a fresh snapshot: drop the ones the
+   * server now reflects, replay the rest right after a re-join, and keep them
+   * visible meanwhile so the board doesn't flicker back.
+   */
+  private reconcileStamps(message: Extract<ServerMessage, { t: 'sync' }>): SessionSnapshot {
+    const { session, self } = message;
+    const resend = this.resendOnSync;
+    this.resendOnSync = false;
+
+    const me = session.players.find((p) => p.id === self.playerId);
+    const card = self.card?.join('\n') ?? null;
+    if (!me || session.status !== 'running' || card !== this.pendingCard) {
+      this.clearPendingStamps();
+      return session;
+    }
+
+    for (const [index, on] of this.pendingStamps) {
+      if (me.stamps[index] === on) this.pendingStamps.delete(index);
+    }
+    if (this.pendingStamps.size === 0) return session;
+
+    if (resend) {
+      for (const [index, on] of this.pendingStamps) this.send({ t: 'stamp', index, on });
+    }
+    return withStamps(session, me.id, this.pendingStamps);
+  }
+
+  private clearPendingStamps() {
+    this.pendingStamps.clear();
+    this.pendingCard = null;
   }
 
   private nameOf(message: Extract<ServerMessage, { t: 'sync' }>): string {
@@ -333,16 +461,14 @@ class Connection {
     const self = this.state.self;
     const session = this.state.session;
     if (!self || !session) return;
-    this.patch({
-      session: {
-        ...session,
-        players: session.players.map((p) =>
-          p.id === self.playerId
-            ? { ...p, stamps: p.stamps.map((s, i) => (i === index ? on : s)) }
-            : p,
-        ),
-      },
-    });
+    const card = self.card?.join('\n') ?? null;
+    if (card !== this.pendingCard) {
+      this.pendingStamps.clear();
+      this.pendingCard = card;
+    }
+    // Remembered until a snapshot confirms it, so a dead socket can't swallow it.
+    this.pendingStamps.set(index, on);
+    this.patch({ session: withStamps(session, self.playerId, new Map([[index, on]])) });
     this.send({ t: 'stamp', index, on });
   }
 
@@ -350,6 +476,7 @@ class Connection {
     const code = this.state.session?.code;
     this.send({ t: 'leave' });
     if (code) forgetSeat(code);
+    this.clearPendingStamps();
     this.intent = null;
     this.patch({ session: null, self: null, pending: false, formError: null });
   }
