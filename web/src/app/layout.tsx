@@ -1,11 +1,15 @@
 import type { Metadata, Viewport } from 'next';
 
 import { Notices } from '@/components/Notices';
+import { ServiceWorker } from '@/components/ServiceWorker';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Bingo',
   description: 'Bingo mit Freunden — live, ohne Anmeldung.',
+  applicationName: 'Bingo',
+  appleWebApp: { capable: true, title: 'Bingo', statusBarStyle: 'default' },
+  formatDetection: { telephone: false },
 };
 
 export const viewport: Viewport = {
@@ -21,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased">
         {children}
         <Notices />
+        <ServiceWorker />
       </body>
     </html>
   );

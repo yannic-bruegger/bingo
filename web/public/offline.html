@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bingo — offline</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #faf9f7; --ink: #2a2530; --muted: #7a7482; --accent: #903d8b; }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #131215; --ink: #f0eef2; --muted: #a39dab; --accent: #d179ca; }
+      }
+      body {
+        margin: 0; min-height: 100dvh; display: grid; place-items: center;
+        background: var(--bg); color: var(--ink); text-align: center; padding: 0 16px;
+        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      }
+      img { width: 72px; height: 72px; border-radius: 16px; }
+      h1 { font-size: 1.25rem; margin: 20px 0 6px; }
+      p { color: var(--muted); margin: 0 0 24px; }
+      button {
+        font: inherit; border: 0; border-radius: 10px; padding: 10px 20px;
+        background: var(--accent); color: #fff; cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/icon-192.png" alt="" />
+      <h1>Keine Verbindung</h1>
+      <p>Bingo läuft live — sobald du wieder online bist, geht es weiter.</p>
+      <button onclick="location.reload()">Erneut versuchen</button>
+    </main>
+  </body>
+</html>
