@@ -3,6 +3,12 @@ export type WordList = {
   name: string;
   /** Label of the free centre cell on odd-sized cards. */
   freeLabel: string;
+  /**
+   * Each word carries its 1-based position as a number, shown on the card —
+   * the way the original printed card labels its cells. The order of `words`
+   * is then part of the data and must not change.
+   */
+  numbered?: boolean;
   words: string[];
 };
 
@@ -15,6 +21,8 @@ export const WORD_LISTS: WordList[] = [
     id: 'winglbingo',
     name: 'Winglbingo',
     freeLabel: 'LÜGE',
+    // Numbers as on the original card at mfbc.us/m/bcwgsjb (checked against it).
+    numbered: true,
     words: [
       'schnauf / ßo',
       'Stärkelord / unbesiegt',

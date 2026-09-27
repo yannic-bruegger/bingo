@@ -23,6 +23,7 @@ export function BingoCard({
   onToggle,
   disabled,
   hints,
+  numbers,
 }: {
   card: string[];
   stamps: boolean[];
@@ -32,6 +33,8 @@ export function BingoCard({
   disabled?: boolean;
   /** Cells someone else already stamped — they blink until this player does too. */
   hints?: ReadonlySet<number>;
+  /** Per cell, the word's number on lists that have them. */
+  numbers?: (number | null)[] | null;
 }) {
   const winning = useMemo(() => {
     const set = new Set<number>();
@@ -50,6 +53,8 @@ export function BingoCard({
           const stamped = Boolean(stamps[index]);
           const inLine = winning.has(index);
           const hinted = !stamped && !isFree && Boolean(hints?.has(index));
+          const number = isFree ? null : (numbers?.[index] ?? null);
+          const label = number === null ? word : `${number} ${word}`;
 
           return (
             <button
@@ -58,9 +63,9 @@ export function BingoCard({
               disabled={disabled || isFree}
               aria-pressed={stamped}
               onClick={() => onToggle?.(index, !stamped)}
-              aria-label={hinted ? `${word} – von anderen schon abgehakt` : word}
+              aria-label={hinted ? `${label} – von anderen schon abgehakt` : label}
               className={cx(
-                'flex aspect-square items-center justify-center rounded-xl border p-1 text-center',
+                'relative flex aspect-square items-center justify-center rounded-xl border p-1 text-center',
                 'leading-[1.05] break-words hyphens-auto transition-colors duration-150',
                 'disabled:cursor-default',
                 isFree
@@ -75,6 +80,14 @@ export function BingoCard({
               )}
               style={{ fontSize: `calc(clamp(0.5rem, ${14 / size}cqw, 1.05rem) * ${fit(word)})` }}
             >
+              {number !== null && (
+                <span
+                  aria-hidden
+                  className="absolute top-1 left-1.5 font-mono text-[0.625rem] leading-none tabular-nums opacity-55"
+                >
+                  {number}
+                </span>
+              )}
               <span className="max-h-full overflow-hidden">{word}</span>
             </button>
           );

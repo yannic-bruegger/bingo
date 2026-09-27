@@ -26,8 +26,8 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
   const place = session.winners.indexOf(self.playerId);
   const wins = me?.wins ?? 0;
 
-  const celebrating = useCelebration(wins, self.card, me?.stamps);
-  const board = celebrating ?? { card: self.card, stamps: me?.stamps ?? [] };
+  const celebrating = useCelebration(wins, self.card, me?.stamps, self.numbers);
+  const board = celebrating ?? { card: self.card, stamps: me?.stamps ?? [], numbers: self.numbers };
   // Hints belong to the live card, never to the one being celebrated.
   const hints = celebrating || finished ? undefined : new Set(self.hints);
 
@@ -137,6 +137,7 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
         {board.card ? (
           <BingoCard
             card={board.card}
+            numbers={board.numbers}
             stamps={board.stamps}
             size={session.size}
             freeIndex={self.freeIndex}
@@ -169,13 +170,16 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
  * would make the winning card vanish before anyone saw it. So we hold on to the
  * finished board for a moment and show that instead.
  */
+type Board = { card: string[]; stamps: boolean[]; numbers: (number | null)[] | null };
+
 function useCelebration(
   wins: number,
   card: string[] | null,
   stamps: boolean[] | undefined,
-): { card: string[]; stamps: boolean[] } | null {
-  const [frozen, setFrozen] = useState<{ card: string[]; stamps: boolean[] } | null>(null);
-  const previous = useRef<{ card: string[]; stamps: boolean[] } | null>(null);
+  numbers: (number | null)[] | null,
+): Board | null {
+  const [frozen, setFrozen] = useState<Board | null>(null);
+  const previous = useRef<Board | null>(null);
   const seenWins = useRef(wins);
 
   useEffect(() => {
@@ -190,7 +194,7 @@ function useCelebration(
 
   // Runs after the effect above, so a win still sees the pre-swap board.
   useEffect(() => {
-    if (card) previous.current = { card, stamps: stamps ?? [] };
+    if (card) previous.current = { card, stamps: stamps ?? [], numbers };
   });
 
   return frozen;

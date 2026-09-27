@@ -70,6 +70,8 @@ export type SelfState = {
   card: string[] | null;
   /** Index of the free space, or -1 for even-sized cards. */
   freeIndex: number;
+  /** Per cell, the word's number on lists that have them (free cell: null). */
+  numbers: (number | null)[] | null;
   /**
    * Cells on this card whose word another player has stamped but this player
    * hasn't yet. Always empty unless the round has `shareStamps` on.
