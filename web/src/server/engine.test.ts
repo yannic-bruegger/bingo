@@ -495,3 +495,69 @@ describe('free cell counter', () => {
     assert.equal(player.freeCount, 0);
   });
 });
+
+describe('surviving a restart', () => {
+  /** What a deploy does: save, serialize, start a fresh engine, restore. */
+  function restart(engine: Engine) {
+    const next = new Engine();
+    const restored = next.restore(JSON.parse(JSON.stringify(engine.save())));
+    return { next, restored };
+  }
+
+  it('brings a running round back with cards, stamps, counts and host', () => {
+    const { engine, session, hostId } = started(5, ['Host', 'Gast']);
+    assert.ok(engine.configure(session, hostId, { shareStamps: true, freeCounter: true }).ok);
+    engine.stamp(session, hostId, 0, true);
+    engine.count(session, hostId, 1);
+    engine.count(session, hostId, 1);
+    const host = session.players.get(hostId)!;
+    const guest = [...session.players.values()].find((p) => p.id !== hostId)!;
+
+    const { next, restored } = restart(engine);
+    assert.equal(restored, 1);
+    const back = next.get(session.code)!;
+    assert.equal(back.status, 'running');
+    assert.equal(back.shareStamps, true);
+    assert.ok([...back.players.values()].every((p) => !p.connected), 'nobody is connected yet');
+
+    const guestBack = next.join(session.code, guest.name, guest.id);
+    assert.ok(guestBack.ok && guestBack.rejoined);
+    assert.equal(next.snapshot(back).hostId, guest.id, 'guest stands in while the host is away');
+
+    const hostBack = next.join(session.code, 'Host', hostId);
+    assert.ok(hostBack.ok);
+    assert.equal(hostBack.rejoined, true);
+    assert.deepEqual(hostBack.player.card, host.card);
+    assert.equal(hostBack.player.stamps[0], true);
+    assert.equal(hostBack.player.freeCount, 2);
+    assert.equal(next.snapshot(back).hostId, hostId);
+    assert.deepEqual(next.selfState(back, hostBack.player).numbers, engine.selfState(session, host).numbers);
+  });
+
+  it('gives restored seats a fresh grace period instead of sweeping them', () => {
+    const { engine, session } = started(5, ['Host', 'Gast']);
+    for (const p of [...session.players.values()]) engine.markDisconnected(session, p.id);
+    const later = Date.now() + GHOST_PLAYER_TTL_MS - 60_000;
+
+    const next = new Engine();
+    next.restore(JSON.parse(JSON.stringify(engine.save())), later);
+    next.sweep(later + 5 * 60_000);
+    assert.equal(next.get(session.code)?.players.size, 2);
+  });
+
+  it('ignores files it does not understand and fills in fields added later', () => {
+    const engine = new Engine();
+    assert.equal(engine.restore(null), 0);
+    assert.equal(engine.restore({ version: 99, sessions: [] }), 0);
+    assert.equal(engine.restore({ version: 1, sessions: [{ broken: true }] }), 0);
+
+    const { engine: old, session } = started(5, ['Host']);
+    const saved = JSON.parse(JSON.stringify(old.save()));
+    delete saved.sessions[0].freeCounter;
+    delete saved.sessions[0].players[0].freeCount;
+    assert.equal(engine.restore(saved), 1);
+    const back = engine.get(session.code)!;
+    assert.equal(back.freeCounter, false);
+    assert.equal([...back.players.values()][0].freeCount, 0);
+  });
+});

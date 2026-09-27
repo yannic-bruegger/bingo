@@ -88,6 +88,23 @@ export const EMPTY_SESSION_TTL_MS = 3 * 60 * 60 * 1000;
  */
 export const GHOST_PLAYER_TTL_MS = 3 * 60 * 60 * 1000;
 
+/**
+ * Everything needed to bring the rounds back after a restart. Plain JSON: the
+ * Maps inside a session are stored as arrays.
+ */
+export type SavedState = {
+  version: typeof SAVE_VERSION;
+  savedAt: number;
+  sessions: SavedSession[];
+};
+
+type SavedSession = Omit<Session, 'players' | 'list'> & {
+  players: Player[];
+  list: Omit<SessionList, 'numbers'> & { numbers?: [string, number][] };
+};
+
+const SAVE_VERSION = 1;
+
 export class Engine {
   private sessions = new Map<string, Session>();
 
@@ -445,6 +462,66 @@ export class Engine {
 
   get size(): number {
     return this.sessions.size;
+  }
+
+  /* -------------------------------- persistence ------------------------------- */
+
+  save(now = Date.now()): SavedState {
+    return {
+      version: SAVE_VERSION,
+      savedAt: now,
+      sessions: [...this.sessions.values()].map((session) => ({
+        ...session,
+        players: [...session.players.values()],
+        list: {
+          ...session.list,
+          numbers: session.list.numbers ? [...session.list.numbers] : undefined,
+        },
+      })),
+    };
+  }
+
+  /**
+   * Brings saved rounds back. Nobody is connected yet, so every player starts
+   * out as away — their seat, card and host role wait for them from `now` on,
+   * exactly as after a dropped socket. Fields a newer version added get their
+   * defaults; a malformed session is skipped rather than blocking the start.
+   * Returns how many sessions came back.
+   */
+  restore(state: unknown, now = Date.now()): number {
+    if (!state || typeof state !== 'object') return 0;
+    const saved = state as Partial<SavedState>;
+    if (saved.version !== SAVE_VERSION || !Array.isArray(saved.sessions)) return 0;
+
+    let restored = 0;
+    for (const raw of saved.sessions) {
+      try {
+        const players = raw.players.map((p): Player => ({
+          ...newPlayer(p.name),
+          ...p,
+          connected: false,
+          disconnectedAt: now,
+        }));
+        if (players.length === 0 || !Array.isArray(raw.list.words)) continue;
+        const session: Session = {
+          ...raw,
+          shareStamps: raw.shareStamps ?? false,
+          freeCounter: raw.freeCounter ?? false,
+          list: {
+            ...raw.list,
+            numbers: raw.list.numbers ? new Map(raw.list.numbers) : undefined,
+          },
+          players: new Map(players.map((p) => [p.id, p])),
+          order: raw.order.filter((id) => players.some((p) => p.id === id)),
+          touchedAt: now,
+        };
+        this.sessions.set(session.code, session);
+        restored += 1;
+      } catch {
+        /* one broken round must not take the others with it */
+      }
+    }
+    return restored;
   }
 
   /* ---------------------------------- internals ------------------------------- */
