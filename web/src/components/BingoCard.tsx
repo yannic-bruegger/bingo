@@ -22,6 +22,7 @@ export function BingoCard({
   freeIndex,
   onToggle,
   disabled,
+  hints,
 }: {
   card: string[];
   stamps: boolean[];
@@ -29,6 +30,8 @@ export function BingoCard({
   freeIndex: number;
   onToggle?: (index: number, on: boolean) => void;
   disabled?: boolean;
+  /** Cells someone else already stamped — they blink until this player does too. */
+  hints?: ReadonlySet<number>;
 }) {
   const winning = useMemo(() => {
     const set = new Set<number>();
@@ -46,6 +49,7 @@ export function BingoCard({
           const isFree = index === freeIndex;
           const stamped = Boolean(stamps[index]);
           const inLine = winning.has(index);
+          const hinted = !stamped && !isFree && Boolean(hints?.has(index));
 
           return (
             <button
@@ -54,7 +58,7 @@ export function BingoCard({
               disabled={disabled || isFree}
               aria-pressed={stamped}
               onClick={() => onToggle?.(index, !stamped)}
-              aria-label={word}
+              aria-label={hinted ? `${word} – von anderen schon abgehakt` : word}
               className={cx(
                 'flex aspect-square items-center justify-center rounded-xl border p-1 text-center',
                 'leading-[1.05] break-words hyphens-auto transition-colors duration-150',
@@ -65,7 +69,9 @@ export function BingoCard({
                     ? 'animate-pop border-accent bg-accent text-accent-ink'
                     : stamped
                       ? 'animate-pop border-accent/40 bg-accent-soft text-ink'
-                      : 'border-line bg-surface text-ink hover:border-ink/30 hover:bg-faint',
+                      : hinted
+                        ? 'animate-hint border-2 border-accent bg-surface text-ink'
+                        : 'border-line bg-surface text-ink hover:border-ink/30 hover:bg-faint',
               )}
               style={{ fontSize: `calc(clamp(0.5rem, ${14 / size}cqw, 1.05rem) * ${fit(word)})` }}
             >

@@ -96,6 +96,22 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
               />
             </Field>
 
+            <Field label="Hinweise">
+              <Segmented<'off' | 'on'>
+                columns={1}
+                value={session.shareStamps ? 'on' : 'off'}
+                onChange={(value) => connection.configure({ shareStamps: value === 'on' })}
+                options={[
+                  { value: 'off', label: 'Aus', hint: 'Jede Person hakt für sich ab' },
+                  {
+                    value: 'on',
+                    label: 'An',
+                    hint: 'Hakt jemand einen Begriff ab, blinkt er bei allen, die ihn auch haben',
+                  },
+                ]}
+              />
+            </Field>
+
             <Field label="Kartengröße">
               <Segmented
                 value={session.size}
@@ -122,6 +138,11 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
                 {session.mode === 'endless' ? 'Endlos' : 'Wettlauf'}
               </span>
             </p>
+            {session.shareStamps && (
+              <p className="mt-0.5 text-xs text-muted">
+                Abgehakte Begriffe blinken bei allen, die sie auch haben
+              </p>
+            )}
             <p className="mt-1 text-sm text-ink">Warten auf den Host …</p>
           </section>
         )}

@@ -358,3 +358,62 @@ describe('word lists', () => {
     assert.equal(shared.list.freeLabel, WORD_LISTS[0].freeLabel);
   });
 });
+
+describe('shared stamp hints', () => {
+  /** Two players, 3×3 from an eight-word list: both cards hold the same words. */
+  function sharedRound(shareStamps: boolean) {
+    const engine = new Engine();
+    const created = engine.createSession('Anna', customList(MIN_WORDS), 3);
+    assert.ok(created.ok);
+    const { session } = created;
+    const joined = engine.join(session.code, 'Ben');
+    assert.ok(joined.ok);
+    const anna = created.player;
+    const ben = joined.player;
+    assert.ok(engine.configure(session, anna.id, { shareStamps }).ok);
+    assert.ok(engine.start(session, anna.id).ok);
+    const free = freeIndexFor(3);
+    const pick = anna.card!.findIndex((_, i) => i !== free);
+    const word = anna.card![pick];
+    const onBen = ben.card!.indexOf(word);
+    return { engine, session, anna, ben, pick, onBen };
+  }
+
+  it('stays quiet unless the round has hints on', () => {
+    const { engine, session, anna, ben, pick } = sharedRound(false);
+    engine.stamp(session, anna.id, pick, true);
+    assert.deepEqual(engine.selfState(session, ben).hints, []);
+  });
+
+  it('points others to the word someone stamped until they stamp it too', () => {
+    const { engine, session, anna, ben, pick, onBen } = sharedRound(true);
+    assert.deepEqual(engine.selfState(session, ben).hints, []);
+
+    engine.stamp(session, anna.id, pick, true);
+    assert.deepEqual(engine.selfState(session, ben).hints, [onBen]);
+    assert.deepEqual(engine.selfState(session, anna).hints, [], 'no hint for your own stamp');
+
+    engine.stamp(session, ben.id, onBen, true);
+    assert.deepEqual(engine.selfState(session, ben).hints, []);
+  });
+
+  it('drops the hint when the stamp is taken back', () => {
+    const { engine, session, anna, ben, pick } = sharedRound(true);
+    engine.stamp(session, anna.id, pick, true);
+    engine.stamp(session, anna.id, pick, false);
+    assert.deepEqual(engine.selfState(session, ben).hints, []);
+  });
+
+  it('can be switched mid-game, unlike anything that changes the cards', () => {
+    const { engine, session, anna, ben, pick, onBen } = sharedRound(false);
+    engine.stamp(session, anna.id, pick, true);
+
+    assert.ok(engine.configure(session, anna.id, { shareStamps: true }).ok);
+    assert.deepEqual(engine.selfState(session, ben).hints, [onBen]);
+    assert.equal(engine.snapshot(session).shareStamps, true);
+
+    const denied = engine.configure(session, anna.id, { size: 4 });
+    assert.equal(denied.ok === false && denied.code, 'already_running');
+    assert.equal(engine.configure(session, ben.id, { shareStamps: false }).ok, false);
+  });
+});
