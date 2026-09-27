@@ -112,6 +112,24 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
               />
             </Field>
 
+            {session.size % 2 === 1 && (
+              <Field label="Mittelfeld">
+                <Segmented<'free' | 'count'>
+                  columns={1}
+                  value={session.freeCounter ? 'count' : 'free'}
+                  onChange={(value) => connection.configure({ freeCounter: value === 'count' })}
+                  options={[
+                    { value: 'free', label: 'Frei', hint: `„${session.freeLabel}“ ist einfach abgehakt` },
+                    {
+                      value: 'count',
+                      label: 'Zähler',
+                      hint: `Jeder Tipp auf „${session.freeLabel}“ zählt eins hoch`,
+                    },
+                  ]}
+                />
+              </Field>
+            )}
+
             <Field label="Kartengröße">
               <Segmented
                 value={session.size}
@@ -141,6 +159,11 @@ export function Lobby({ session, self }: { session: SessionSnapshot; self: SelfS
             {session.shareStamps && (
               <p className="mt-0.5 text-xs text-muted">
                 Abgehakte Begriffe blinken bei allen, die sie auch haben
+              </p>
+            )}
+            {session.freeCounter && session.size % 2 === 1 && (
+              <p className="mt-0.5 text-xs text-muted">
+                „{session.freeLabel}“ in der Mitte zählt jeden Tipp
               </p>
             )}
             <p className="mt-1 text-sm text-ink">Warten auf den Host …</p>

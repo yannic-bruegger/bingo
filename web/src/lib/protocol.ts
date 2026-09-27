@@ -29,6 +29,8 @@ export type PublicPlayer = {
   hasBingo: boolean;
   /** Bingos so far this round — only ever above 1 in endless mode. */
   wins: number;
+  /** Taps on the free centre cell this round, when the round counts them. */
+  freeCount: number;
   /** ms since session start, or null. */
   bingoAt: number | null;
 };
@@ -57,6 +59,10 @@ export type SessionSnapshot = {
   list: ListInfo;
   /** When on, a word someone stamps lights up on every other card that has it. */
   shareStamps: boolean;
+  /** When on, the free centre cell counts taps instead of just sitting there. */
+  freeCounter: boolean;
+  /** Label of the free centre cell (e.g. „LÜGE“), for showing the counts. */
+  freeLabel: string;
   hostId: string;
   players: PublicPlayer[];
   /** Player ids in the order they shouted bingo. */
@@ -86,11 +92,19 @@ export type WordListInfo = ListInfo;
 export type ClientMessage =
   | { t: 'create'; name: string; list?: ListRef; size?: number; mode?: GameMode }
   | { t: 'join'; code: string; name: string; playerId?: string }
-  | { t: 'config'; list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean }
+  | {
+      t: 'config';
+      list?: ListRef;
+      size?: number;
+      mode?: GameMode;
+      shareStamps?: boolean;
+      freeCounter?: boolean;
+    }
   | { t: 'start' }
   | { t: 'stop' }
   | { t: 'reset' }
   | { t: 'stamp'; index: number; on: boolean }
+  | { t: 'count'; delta: 1 | -1 }
   | { t: 'leave' }
   | { t: 'ping' };
 

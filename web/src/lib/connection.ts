@@ -440,7 +440,13 @@ class Connection {
     return true;
   }
 
-  configure(patch: { list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean }) {
+  configure(patch: {
+    list?: ListRef;
+    size?: number;
+    mode?: GameMode;
+    shareStamps?: boolean;
+    freeCounter?: boolean;
+  }) {
     this.send({ t: 'config', ...patch });
   }
 
@@ -470,6 +476,11 @@ class Connection {
     this.pendingStamps.set(index, on);
     this.patch({ session: withStamps(session, self.playerId, new Map([[index, on]])) });
     this.send({ t: 'stamp', index, on });
+  }
+
+  /** Tap on the free centre cell when the round counts it (or take one back). */
+  count(delta: 1 | -1) {
+    this.send({ t: 'count', delta });
   }
 
   leave() {
