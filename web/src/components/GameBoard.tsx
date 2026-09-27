@@ -28,6 +28,7 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
 
   const celebrating = useCelebration(wins, self.card, me?.stamps, self.numbers);
   const board = celebrating ?? { card: self.card, stamps: me?.stamps ?? [], numbers: self.numbers };
+  const counting = session.freeCounter && self.freeIndex >= 0;
   // Hints belong to the live card, never to the one being celebrated.
   const hints = celebrating || finished ? undefined : new Set(self.hints);
 
@@ -54,6 +55,7 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
               <span className="text-muted">
                 {session.size} × {session.size} · {endless ? 'Endlos' : 'Wettlauf'}
                 {session.shareStamps && ' · mit Hinweisen'}
+                {counting && ` · ${session.freeLabel} zählt`}
               </span>
             </p>
           </section>
@@ -73,6 +75,16 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
                   onClick={() => connection.configure({ shareStamps: !session.shareStamps })}
                 >
                   Hinweise {session.shareStamps ? 'an' : 'aus'}
+                </Button>
+              )}
+              {!finished && self.freeIndex >= 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-pressed={session.freeCounter}
+                  onClick={() => connection.configure({ freeCounter: !session.freeCounter })}
+                >
+                  {session.freeLabel}-Zähler {session.freeCounter ? 'an' : 'aus'}
                 </Button>
               )}
               {!finished && (
@@ -143,6 +155,8 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
             freeIndex={self.freeIndex}
             disabled={finished || Boolean(celebrating)}
             hints={hints}
+            freeCount={counting ? (me?.freeCount ?? 0) : null}
+            onCount={(delta) => connection.count(delta)}
             onToggle={(index, on) => connection.stamp(index, on)}
           />
         ) : (

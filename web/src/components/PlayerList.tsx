@@ -31,6 +31,12 @@ function order(session: SessionSnapshot): PublicPlayer[] {
 }
 
 function progressOf(session: SessionSnapshot, player: PublicPlayer): string {
+  const tally =
+    session.freeCounter && player.freeCount > 0 ? ` · ${session.freeLabel} ${player.freeCount}×` : '';
+  return progressLine(session, player) + tally;
+}
+
+function progressLine(session: SessionSnapshot, player: PublicPlayer): string {
   if (session.mode === 'endless') {
     const lines = `${player.lines} ${player.lines === 1 ? 'Reihe' : 'Reihen'}`;
     return player.wins > 0

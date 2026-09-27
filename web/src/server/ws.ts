@@ -176,6 +176,7 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
           size: typeof message.size === 'number' ? message.size : undefined,
           mode: message.mode,
           shareStamps: message.shareStamps,
+          freeCounter: message.freeCounter,
         });
         if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
         return broadcast(session.code);
@@ -194,6 +195,11 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
       }
       case 'reset': {
         const result = engine.reset(session, playerId);
+        if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
+        return broadcast(session.code);
+      }
+      case 'count': {
+        const result = engine.count(session, playerId, Number(message.delta));
         if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
         return broadcast(session.code);
       }

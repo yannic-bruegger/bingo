@@ -45,6 +45,8 @@ export type Player = {
   hasBingo: boolean;
   bingoAt: number | null;
   wins: number;
+  /** Taps on the free centre cell this round — see `Session.freeCounter`. */
+  freeCount: number;
   disconnectedAt: number | null;
 };
 
@@ -55,6 +57,7 @@ export type Session = {
   size: number;
   list: SessionList;
   shareStamps: boolean;
+  freeCounter: boolean;
   /**
    * Who owns the round. Sticky: it only changes when this player leaves for
    * good. While they are away, `actingHostId` picks a stand-in.
@@ -119,6 +122,7 @@ export class Engine {
       size: cardSize,
       list: resolved.list,
       shareStamps: false,
+      freeCounter: false,
       hostId: player.id,
       order: [player.id],
       players: new Map([[player.id, player]]),
@@ -192,14 +196,23 @@ export class Engine {
   configure(
     session: Session,
     playerId: string,
-    patch: { list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean },
+    patch: {
+      list?: ListRef;
+      size?: number;
+      mode?: GameMode;
+      shareStamps?: boolean;
+      freeCounter?: boolean;
+    },
   ): Result<object> {
     if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann das ändern.');
 
-    // Hints change nothing about the cards, so they may be flipped mid-game.
-    if (patch.shareStamps !== undefined) {
-      if (typeof patch.shareStamps !== 'boolean') return fail('bad_request', 'Ungültige Einstellung.');
-      session.shareStamps = patch.shareStamps;
+    // Hints and the counter change nothing about the cards, so they may be
+    // flipped mid-game.
+    for (const key of ['shareStamps', 'freeCounter'] as const) {
+      const value = patch[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'boolean') return fail('bad_request', 'Ungültige Einstellung.');
+      session[key] = value;
     }
     const touchesCards = patch.list !== undefined || patch.size !== undefined || patch.mode !== undefined;
     if (!touchesCards) {
@@ -255,6 +268,7 @@ export class Engine {
       const player = session.players.get(id);
       if (!player) continue;
       player.wins = 0;
+      player.freeCount = 0;
       dealTo(session, player);
     }
     touch(session);
@@ -281,6 +295,7 @@ export class Engine {
       player.hasBingo = false;
       player.bingoAt = null;
       player.wins = 0;
+      player.freeCount = 0;
     }
     touch(session);
     return { ok: true };
@@ -324,6 +339,23 @@ export class Engine {
     return { ok: true, bingo: false };
   }
 
+  /**
+   * One tap on the free centre cell, or one taken back. The count belongs to
+   * the round, not the card, so a fresh card in endless mode keeps it.
+   */
+  count(session: Session, playerId: string, delta: number): Result<{ freeCount: number }> {
+    const player = session.players.get(playerId);
+    if (!player || !player.card) return fail('bad_request', 'Du hast noch keine Karte.');
+    if (session.status !== 'running') return fail('bad_request', 'Das Spiel läuft gerade nicht.');
+    if (!session.freeCounter || freeIndexFor(session.size) < 0) {
+      return fail('bad_request', 'In dieser Runde wird nicht gezählt.');
+    }
+    if (delta !== 1 && delta !== -1) return fail('bad_request', 'Ungültige Zählung.');
+    player.freeCount = Math.max(0, player.freeCount + delta);
+    touch(session);
+    return { ok: true, freeCount: player.freeCount };
+  }
+
   /* -------------------------------- projections ------------------------------- */
 
   snapshot(session: Session): SessionSnapshot {
@@ -335,6 +367,8 @@ export class Engine {
       size: session.size,
       list: { id: session.list.id, name: session.list.name, count: session.list.count, source: session.list.source },
       shareStamps: session.shareStamps,
+      freeCounter: session.freeCounter,
+      freeLabel: session.list.freeLabel,
       hostId: actingHostId(session),
       winners: [...session.winners],
       startedAt: session.startedAt,
@@ -351,6 +385,7 @@ export class Engine {
           hasBingo: p.hasBingo,
           bingoAt: p.bingoAt,
           wins: p.wins,
+          freeCount: p.freeCount,
         })),
     };
   }
@@ -443,6 +478,7 @@ function newPlayer(name: string): Player {
     hasBingo: false,
     bingoAt: null,
     wins: 0,
+    freeCount: 0,
     disconnectedAt: null,
   };
 }

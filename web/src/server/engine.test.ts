@@ -446,3 +446,52 @@ describe('numbered lists', () => {
     assert.equal(engine.selfState(created.session, created.player).numbers, null);
   });
 });
+
+describe('free cell counter', () => {
+  function counting(size = 5, on = true) {
+    const engine = new Engine();
+    const created = engine.createSession('Host', LIST, size);
+    assert.ok(created.ok);
+    assert.ok(engine.configure(created.session, created.player.id, { freeCounter: on }).ok);
+    assert.ok(engine.start(created.session, created.player.id).ok);
+    return { engine, session: created.session, player: created.player };
+  }
+
+  it('counts taps up and back down, never below zero', () => {
+    const { engine, session, player } = counting();
+    for (let i = 0; i < 3; i++) assert.ok(engine.count(session, player.id, 1).ok);
+    assert.ok(engine.count(session, player.id, -1).ok);
+    assert.equal(engine.snapshot(session).players[0].freeCount, 2);
+
+    engine.count(session, player.id, -1);
+    engine.count(session, player.id, -1);
+    engine.count(session, player.id, -1);
+    assert.equal(player.freeCount, 0);
+  });
+
+  it('keeps the free cell stamped while counting', () => {
+    const { engine, session, player } = counting();
+    engine.count(session, player.id, 1);
+    assert.equal(player.stamps[freeIndexFor(5)], true);
+  });
+
+  it('only counts when the round has it on and the card has a centre', () => {
+    const off = counting(5, false);
+    assert.equal(off.engine.count(off.session, off.player.id, 1).ok, false);
+
+    const even = counting(4, true);
+    assert.equal(even.engine.count(even.session, even.player.id, 1).ok, false);
+
+    const odd = counting();
+    assert.equal(odd.engine.count(odd.session, odd.player.id, 5).ok, false);
+  });
+
+  it('starts every round from zero', () => {
+    const { engine, session, player } = counting();
+    engine.count(session, player.id, 1);
+    assert.ok(engine.reset(session, player.id).ok);
+    assert.equal(player.freeCount, 0);
+    assert.ok(engine.start(session, player.id).ok);
+    assert.equal(player.freeCount, 0);
+  });
+});
