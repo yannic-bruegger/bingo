@@ -49,6 +49,7 @@ export type Session = {
   mode: GameMode;
   size: number;
   list: SessionList;
+  shareStamps: boolean;
   /**
    * Who owns the round. Sticky: it only changes when this player leaves for
    * good. While they are away, `actingHostId` picks a stand-in.
@@ -112,6 +113,7 @@ export class Engine {
       mode,
       size: cardSize,
       list: resolved.list,
+      shareStamps: false,
       hostId: player.id,
       order: [player.id],
       players: new Map([[player.id, player]]),
@@ -185,9 +187,20 @@ export class Engine {
   configure(
     session: Session,
     playerId: string,
-    patch: { list?: ListRef; size?: number; mode?: GameMode },
+    patch: { list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean },
   ): Result<object> {
     if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann das ändern.');
+
+    // Hints change nothing about the cards, so they may be flipped mid-game.
+    if (patch.shareStamps !== undefined) {
+      if (typeof patch.shareStamps !== 'boolean') return fail('bad_request', 'Ungültige Einstellung.');
+      session.shareStamps = patch.shareStamps;
+    }
+    const touchesCards = patch.list !== undefined || patch.size !== undefined || patch.mode !== undefined;
+    if (!touchesCards) {
+      touch(session);
+      return { ok: true };
+    }
     if (session.status !== 'lobby') return fail('already_running', 'Das Spiel läuft bereits.');
 
     if (patch.mode !== undefined) {
@@ -316,6 +329,7 @@ export class Engine {
       mode: session.mode,
       size: session.size,
       list: { id: session.list.id, name: session.list.name, count: session.list.count, source: session.list.source },
+      shareStamps: session.shareStamps,
       hostId: actingHostId(session),
       winners: [...session.winners],
       startedAt: session.startedAt,
@@ -341,7 +355,28 @@ export class Engine {
       playerId: player.id,
       card: player.card ? [...player.card] : null,
       freeIndex: freeIndexFor(session.size),
+      hints: this.hintsFor(session, player),
     };
+  }
+
+  /** Cells on `player`'s card that someone else has stamped and they haven't. */
+  private hintsFor(session: Session, player: Player): number[] {
+    if (!session.shareStamps || session.status !== 'running' || !player.card) return [];
+    const free = freeIndexFor(session.size);
+
+    const stampedElsewhere = new Set<string>();
+    for (const other of session.players.values()) {
+      if (other.id === player.id || !other.card) continue;
+      other.card.forEach((word, index) => {
+        if (index !== free && other.stamps[index]) stampedElsewhere.add(word);
+      });
+    }
+
+    const hints: number[] = [];
+    player.card.forEach((word, index) => {
+      if (index !== free && !player.stamps[index] && stampedElsewhere.has(word)) hints.push(index);
+    });
+    return hints;
   }
 
   /* ------------------------------- housekeeping ------------------------------- */

@@ -28,6 +28,8 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
 
   const celebrating = useCelebration(wins, self.card, me?.stamps);
   const board = celebrating ?? { card: self.card, stamps: me?.stamps ?? [] };
+  // Hints belong to the live card, never to the one being celebrated.
+  const hints = celebrating || finished ? undefined : new Set(self.hints);
 
   const podium = endless
     ? [...session.players].filter((p) => p.wins > 0).sort((a, b) => b.wins - a.wins)
@@ -51,6 +53,7 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
               <SourceTag source={session.list.source} />
               <span className="text-muted">
                 {session.size} × {session.size} · {endless ? 'Endlos' : 'Wettlauf'}
+                {session.shareStamps && ' · mit Hinweisen'}
               </span>
             </p>
           </section>
@@ -62,6 +65,16 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
 
           {isHost && (
             <section className="flex flex-col gap-2">
+              {!finished && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  aria-pressed={session.shareStamps}
+                  onClick={() => connection.configure({ shareStamps: !session.shareStamps })}
+                >
+                  Hinweise {session.shareStamps ? 'an' : 'aus'}
+                </Button>
+              )}
               {!finished && (
                 <Button variant="outline" size="sm" onClick={() => connection.stop()}>
                   Runde beenden
@@ -128,6 +141,7 @@ export function GameBoard({ session, self }: { session: SessionSnapshot; self: S
             size={session.size}
             freeIndex={self.freeIndex}
             disabled={finished || Boolean(celebrating)}
+            hints={hints}
             onToggle={(index, on) => connection.stamp(index, on)}
           />
         ) : (

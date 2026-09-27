@@ -175,6 +175,7 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
           list: message.list,
           size: typeof message.size === 'number' ? message.size : undefined,
           mode: message.mode,
+          shareStamps: message.shareStamps,
         });
         if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
         return broadcast(session.code);

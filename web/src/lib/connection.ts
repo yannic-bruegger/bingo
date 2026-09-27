@@ -440,7 +440,7 @@ class Connection {
     return true;
   }
 
-  configure(patch: { list?: ListRef; size?: number; mode?: GameMode }) {
+  configure(patch: { list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean }) {
     this.send({ t: 'config', ...patch });
   }
 

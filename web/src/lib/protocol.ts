@@ -55,6 +55,8 @@ export type SessionSnapshot = {
   mode: GameMode;
   size: number;
   list: ListInfo;
+  /** When on, a word someone stamps lights up on every other card that has it. */
+  shareStamps: boolean;
   hostId: string;
   players: PublicPlayer[];
   /** Player ids in the order they shouted bingo. */
@@ -68,6 +70,11 @@ export type SelfState = {
   card: string[] | null;
   /** Index of the free space, or -1 for even-sized cards. */
   freeIndex: number;
+  /**
+   * Cells on this card whose word another player has stamped but this player
+   * hasn't yet. Always empty unless the round has `shareStamps` on.
+   */
+  hints: number[];
 };
 
 export type WordListInfo = ListInfo;
@@ -77,7 +84,7 @@ export type WordListInfo = ListInfo;
 export type ClientMessage =
   | { t: 'create'; name: string; list?: ListRef; size?: number; mode?: GameMode }
   | { t: 'join'; code: string; name: string; playerId?: string }
-  | { t: 'config'; list?: ListRef; size?: number; mode?: GameMode }
+  | { t: 'config'; list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean }
   | { t: 'start' }
   | { t: 'stop' }
   | { t: 'reset' }
