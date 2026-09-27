@@ -417,3 +417,32 @@ describe('shared stamp hints', () => {
     assert.equal(engine.configure(session, ben.id, { shareStamps: false }).ok, false);
   });
 });
+
+describe('numbered lists', () => {
+  it('labels Winglbingo cells with the numbers from the original card', () => {
+    const { engine, session, hostId } = started(5, ['Host']);
+    const self = engine.selfState(session, session.players.get(hostId)!);
+    assert.ok(self.card && self.numbers);
+
+    const free = freeIndexFor(5);
+    assert.equal(self.numbers[free], null);
+    self.card.forEach((word, i) => {
+      if (i !== free) assert.equal(self.numbers![i], WORD_LISTS[0].words.indexOf(word) + 1);
+    });
+
+    // Spot checks read off cards at mfbc.us/m/bcwgsjb.
+    const numberOf = (word: string) => WORD_LISTS[0].words.indexOf(word) + 1;
+    assert.equal(numberOf('schnauf / ßo'), 1);
+    assert.equal(numberOf('Polizei'), 20);
+    assert.equal(numberOf('Lets plays'), 46);
+    assert.equal(numberOf('Paranoia / alarmanlage'), 60);
+  });
+
+  it('leaves custom lists unnumbered', () => {
+    const engine = new Engine();
+    const created = engine.createSession('Host', customList(30), 5);
+    assert.ok(created.ok);
+    assert.ok(engine.start(created.session, created.player.id).ok);
+    assert.equal(engine.selfState(created.session, created.player).numbers, null);
+  });
+});

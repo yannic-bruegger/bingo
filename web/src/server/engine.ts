@@ -29,7 +29,12 @@ import {
 import { DEFAULT_LIST_ID, getList } from './wordlists.ts';
 
 /** A list as it lives inside a session — resolved, validated, self-contained. */
-export type SessionList = ListInfo & { words: string[]; freeLabel: string };
+export type SessionList = ListInfo & {
+  words: string[];
+  freeLabel: string;
+  /** Word → its number, for lists whose cells are numbered. */
+  numbers?: ReadonlyMap<string, number>;
+};
 
 export type Player = {
   id: string;
@@ -355,6 +360,7 @@ export class Engine {
       playerId: player.id,
       card: player.card ? [...player.card] : null,
       freeIndex: freeIndexFor(session.size),
+      numbers: numbersFor(session.list, player.card),
       hints: this.hintsFor(session, player),
     };
   }
@@ -460,6 +466,12 @@ export function buildCard(words: string[], size: number, freeLabel = FREE_CELL):
 
 export const FREE_CELL = '★';
 
+function numbersFor(list: SessionList, card: string[] | null): (number | null)[] | null {
+  const numbers = list.numbers;
+  if (!numbers || !card) return null;
+  return card.map((word) => numbers.get(word) ?? null);
+}
+
 /* ----------------------------------- lists ----------------------------------- */
 
 function tooFewWords(count: number, size: number): string {
@@ -485,6 +497,7 @@ export function resolveList(ref: ListRef): Result<{ list: SessionList }> {
         source: 'shared',
         words: list.words,
         freeLabel: list.freeLabel,
+        numbers: list.numbered ? new Map(list.words.map((word, i) => [word, i + 1])) : undefined,
       },
     };
   }
