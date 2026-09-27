@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { MIN_WORDS, freeIndexFor, type ListRef } from '../lib/protocol.ts';
-import { Engine, buildCard, normalizeWords, resolveList } from './engine.ts';
+import {
+  EMPTY_SESSION_TTL_MS,
+  Engine,
+  GHOST_PLAYER_TTL_MS,
+  buildCard,
+  normalizeWords,
+  resolveList,
+} from './engine.ts';
 import { WORD_LISTS } from './wordlists.ts';
 
 const LIST: ListRef = { kind: 'shared', id: WORD_LISTS[0].id };
@@ -69,11 +76,40 @@ describe('sessions', () => {
     assert.deepEqual(back.player.card, cardBefore);
   });
 
-  it('hands the host role to someone who is still connected', () => {
+  it('lets a connected player stand in for an absent host, then hands it back', () => {
     const { engine, session, hostId } = started();
+    const guest = [...session.players.values()].find((p) => p.id !== hostId)!;
+
     engine.markDisconnected(session, hostId);
+    assert.equal(engine.snapshot(session).hostId, guest.id);
+    assert.ok(engine.stop(session, guest.id).ok);
+
+    const back = engine.join(session.code, 'Host', hostId);
+    assert.ok(back.ok);
+    assert.equal(engine.snapshot(session).hostId, hostId);
+    assert.equal(engine.reset(session, guest.id).ok, false);
+    assert.ok(engine.reset(session, hostId).ok);
+  });
+
+  it('keeps the host when both phones take turns going to sleep', () => {
+    const { engine, session, hostId } = started();
+    const guest = [...session.players.values()].find((p) => p.id !== hostId)!;
+
+    engine.markDisconnected(session, hostId);
+    engine.markDisconnected(session, guest.id);
+    engine.join(session.code, guest.name, guest.id);
+    engine.join(session.code, 'Host', hostId);
+    engine.markDisconnected(session, guest.id);
+
+    assert.equal(session.hostId, hostId);
+    assert.equal(engine.snapshot(session).hostId, hostId);
+  });
+
+  it('passes the host role on for good only when the host leaves', () => {
+    const { engine, session, hostId } = started();
+    engine.remove(session, hostId);
     assert.notEqual(session.hostId, hostId);
-    assert.equal(session.players.get(session.hostId)?.connected, true);
+    assert.equal(engine.snapshot(session).hostId, session.hostId);
   });
 
   it('only lets the host start, stop and configure', () => {
@@ -197,14 +233,30 @@ describe('rounds', () => {
     assert.equal(self.freeIndex, 12);
   });
 
+  it('keeps card, stamps and host through a long idle phone', () => {
+    const { engine, session, hostId } = started(5, ['Host', 'Gast']);
+    engine.stamp(session, hostId, 0, true);
+    const card = session.players.get(hostId)!.card;
+    for (const player of [...session.players.values()]) engine.markDisconnected(session, player.id);
+
+    engine.sweep(Date.now() + 45 * 60 * 1000);
+
+    const back = engine.join(session.code, 'Host', hostId);
+    assert.ok(back.ok);
+    assert.equal(back.rejoined, true);
+    assert.deepEqual(back.player.card, card);
+    assert.equal(back.player.stamps[0], true);
+    assert.equal(engine.snapshot(session).hostId, hostId);
+  });
+
   it('sweeps players who never came back and then the empty session', () => {
     const { engine, session } = started(5, ['Host', 'Gast']);
     for (const player of [...session.players.values()]) engine.markDisconnected(session, player.id);
 
-    engine.sweep(Date.now() + 6 * 60 * 1000);
+    engine.sweep(Date.now() + GHOST_PLAYER_TTL_MS + 60_000);
     assert.equal(session.players.size, 0);
 
-    engine.sweep(Date.now() + 20 * 60 * 1000);
+    engine.sweep(Date.now() + EMPTY_SESSION_TTL_MS + 60_000);
     assert.equal(engine.get(session.code), undefined);
   });
 });
