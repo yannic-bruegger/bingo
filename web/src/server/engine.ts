@@ -49,6 +49,10 @@ export type Session = {
   mode: GameMode;
   size: number;
   list: SessionList;
+  /**
+   * Who owns the round. Sticky: it only changes when this player leaves for
+   * good. While they are away, `actingHostId` picks a stand-in.
+   */
   hostId: string;
   /** Join order — keeps the player list stable across renders. */
   order: string[];
@@ -64,10 +68,16 @@ export type Result<T> = Ok<T> | Fail;
 
 const fail = (code: ErrorCode, message: string): Fail => ({ ok: false, code, message });
 
-/** Sessions with no connected players are dropped after this long. */
-export const EMPTY_SESSION_TTL_MS = 10 * 60 * 1000;
-/** Disconnected players are forgotten after this long. */
-export const GHOST_PLAYER_TTL_MS = 5 * 60 * 1000;
+/**
+ * Sessions with no connected players are dropped after this long. Phones in a
+ * pocket all go quiet at once during a long evening, so this has to cover one.
+ */
+export const EMPTY_SESSION_TTL_MS = 3 * 60 * 60 * 1000;
+/**
+ * Disconnected players keep their seat — card, stamps, host role — this long.
+ * A locked phone drops its socket within seconds; that must never cost a card.
+ */
+export const GHOST_PLAYER_TTL_MS = 3 * 60 * 60 * 1000;
 
 export class Engine {
   private sessions = new Map<string, Session>();
@@ -166,8 +176,7 @@ export class Engine {
     if (!player) return;
     player.connected = false;
     player.disconnectedAt = Date.now();
-    // Never leave a lobby without someone who can press start.
-    if (session.hostId === playerId) reassignHost(session);
+    // The host role stays put — see actingHostId for who steps in meanwhile.
     touch(session);
   }
 
@@ -178,7 +187,7 @@ export class Engine {
     playerId: string,
     patch: { list?: ListRef; size?: number; mode?: GameMode },
   ): Result<object> {
-    if (session.hostId !== playerId) return fail('not_host', 'Nur der Host kann das ändern.');
+    if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann das ändern.');
     if (session.status !== 'lobby') return fail('already_running', 'Das Spiel läuft bereits.');
 
     if (patch.mode !== undefined) {
@@ -214,7 +223,7 @@ export class Engine {
   }
 
   start(session: Session, playerId: string): Result<object> {
-    if (session.hostId !== playerId) return fail('not_host', 'Nur der Host kann starten.');
+    if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann starten.');
     if (session.status === 'running') return fail('already_running', 'Das Spiel läuft bereits.');
 
     if (session.list.count < wordsNeeded(session.size)) {
@@ -235,7 +244,7 @@ export class Engine {
   }
 
   stop(session: Session, playerId: string): Result<object> {
-    if (session.hostId !== playerId) return fail('not_host', 'Nur der Host kann das Spiel beenden.');
+    if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann das Spiel beenden.');
     if (session.status !== 'running') return fail('bad_request', 'Es läuft gerade kein Spiel.');
     session.status = 'finished';
     touch(session);
@@ -244,7 +253,7 @@ export class Engine {
 
   /** Back to the lobby, cards cleared. */
   reset(session: Session, playerId: string): Result<object> {
-    if (session.hostId !== playerId) return fail('not_host', 'Nur der Host kann eine neue Runde starten.');
+    if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann eine neue Runde starten.');
     session.status = 'lobby';
     session.startedAt = null;
     session.winners = [];
@@ -300,13 +309,14 @@ export class Engine {
   /* -------------------------------- projections ------------------------------- */
 
   snapshot(session: Session): SessionSnapshot {
+    const host = actingHostId(session);
     return {
       code: session.code,
       status: session.status,
       mode: session.mode,
       size: session.size,
       list: { id: session.list.id, name: session.list.name, count: session.list.count, source: session.list.source },
-      hostId: session.hostId,
+      hostId: actingHostId(session),
       winners: [...session.winners],
       startedAt: session.startedAt,
       players: session.order
@@ -315,7 +325,7 @@ export class Engine {
         .map((p): PublicPlayer => ({
           id: p.id,
           name: p.name,
-          isHost: p.id === session.hostId,
+          isHost: p.id === host,
           connected: p.connected,
           stamps: [...p.stamps],
           lines: p.card ? completedLines(p.stamps, session.size).length : 0,
@@ -499,6 +509,17 @@ function shuffle<T>(input: readonly T[]): T[] {
   return out;
 }
 
+/**
+ * The host while they are connected; otherwise the first connected player in
+ * join order stands in, so a round never lacks someone who can start or stop
+ * it. The moment the host is back, the role is theirs again.
+ */
+export function actingHostId(session: Session): string {
+  if (session.players.get(session.hostId)?.connected) return session.hostId;
+  return session.order.find((id) => session.players.get(id)?.connected) ?? session.hostId;
+}
+
+/** Hands ownership on for good — only when the host has left the round. */
 function reassignHost(session: Session): void {
   const next =
     session.order.find((id) => session.players.get(id)?.connected) ?? session.order[0];
