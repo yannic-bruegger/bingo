@@ -45,6 +45,8 @@ export type Player = {
   hasBingo: boolean;
   bingoAt: number | null;
   wins: number;
+  /** Taps on the free centre cell this round — see `Session.freeCounter`. */
+  freeCount: number;
   disconnectedAt: number | null;
 };
 
@@ -55,6 +57,7 @@ export type Session = {
   size: number;
   list: SessionList;
   shareStamps: boolean;
+  freeCounter: boolean;
   /**
    * Who owns the round. Sticky: it only changes when this player leaves for
    * good. While they are away, `actingHostId` picks a stand-in.
@@ -84,6 +87,23 @@ export const EMPTY_SESSION_TTL_MS = 3 * 60 * 60 * 1000;
  * A locked phone drops its socket within seconds; that must never cost a card.
  */
 export const GHOST_PLAYER_TTL_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * Everything needed to bring the rounds back after a restart. Plain JSON: the
+ * Maps inside a session are stored as arrays.
+ */
+export type SavedState = {
+  version: typeof SAVE_VERSION;
+  savedAt: number;
+  sessions: SavedSession[];
+};
+
+type SavedSession = Omit<Session, 'players' | 'list'> & {
+  players: Player[];
+  list: Omit<SessionList, 'numbers'> & { numbers?: [string, number][] };
+};
+
+const SAVE_VERSION = 1;
 
 export class Engine {
   private sessions = new Map<string, Session>();
@@ -119,6 +139,7 @@ export class Engine {
       size: cardSize,
       list: resolved.list,
       shareStamps: false,
+      freeCounter: false,
       hostId: player.id,
       order: [player.id],
       players: new Map([[player.id, player]]),
@@ -192,14 +213,23 @@ export class Engine {
   configure(
     session: Session,
     playerId: string,
-    patch: { list?: ListRef; size?: number; mode?: GameMode; shareStamps?: boolean },
+    patch: {
+      list?: ListRef;
+      size?: number;
+      mode?: GameMode;
+      shareStamps?: boolean;
+      freeCounter?: boolean;
+    },
   ): Result<object> {
     if (actingHostId(session) !== playerId) return fail('not_host', 'Nur der Host kann das ändern.');
 
-    // Hints change nothing about the cards, so they may be flipped mid-game.
-    if (patch.shareStamps !== undefined) {
-      if (typeof patch.shareStamps !== 'boolean') return fail('bad_request', 'Ungültige Einstellung.');
-      session.shareStamps = patch.shareStamps;
+    // Hints and the counter change nothing about the cards, so they may be
+    // flipped mid-game.
+    for (const key of ['shareStamps', 'freeCounter'] as const) {
+      const value = patch[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'boolean') return fail('bad_request', 'Ungültige Einstellung.');
+      session[key] = value;
     }
     const touchesCards = patch.list !== undefined || patch.size !== undefined || patch.mode !== undefined;
     if (!touchesCards) {
@@ -255,6 +285,7 @@ export class Engine {
       const player = session.players.get(id);
       if (!player) continue;
       player.wins = 0;
+      player.freeCount = 0;
       dealTo(session, player);
     }
     touch(session);
@@ -281,6 +312,7 @@ export class Engine {
       player.hasBingo = false;
       player.bingoAt = null;
       player.wins = 0;
+      player.freeCount = 0;
     }
     touch(session);
     return { ok: true };
@@ -324,6 +356,23 @@ export class Engine {
     return { ok: true, bingo: false };
   }
 
+  /**
+   * One tap on the free centre cell, or one taken back. The count belongs to
+   * the round, not the card, so a fresh card in endless mode keeps it.
+   */
+  count(session: Session, playerId: string, delta: number): Result<{ freeCount: number }> {
+    const player = session.players.get(playerId);
+    if (!player || !player.card) return fail('bad_request', 'Du hast noch keine Karte.');
+    if (session.status !== 'running') return fail('bad_request', 'Das Spiel läuft gerade nicht.');
+    if (!session.freeCounter || freeIndexFor(session.size) < 0) {
+      return fail('bad_request', 'In dieser Runde wird nicht gezählt.');
+    }
+    if (delta !== 1 && delta !== -1) return fail('bad_request', 'Ungültige Zählung.');
+    player.freeCount = Math.max(0, player.freeCount + delta);
+    touch(session);
+    return { ok: true, freeCount: player.freeCount };
+  }
+
   /* -------------------------------- projections ------------------------------- */
 
   snapshot(session: Session): SessionSnapshot {
@@ -335,6 +384,8 @@ export class Engine {
       size: session.size,
       list: { id: session.list.id, name: session.list.name, count: session.list.count, source: session.list.source },
       shareStamps: session.shareStamps,
+      freeCounter: session.freeCounter,
+      freeLabel: session.list.freeLabel,
       hostId: actingHostId(session),
       winners: [...session.winners],
       startedAt: session.startedAt,
@@ -351,6 +402,7 @@ export class Engine {
           hasBingo: p.hasBingo,
           bingoAt: p.bingoAt,
           wins: p.wins,
+          freeCount: p.freeCount,
         })),
     };
   }
@@ -412,6 +464,66 @@ export class Engine {
     return this.sessions.size;
   }
 
+  /* -------------------------------- persistence ------------------------------- */
+
+  save(now = Date.now()): SavedState {
+    return {
+      version: SAVE_VERSION,
+      savedAt: now,
+      sessions: [...this.sessions.values()].map((session) => ({
+        ...session,
+        players: [...session.players.values()],
+        list: {
+          ...session.list,
+          numbers: session.list.numbers ? [...session.list.numbers] : undefined,
+        },
+      })),
+    };
+  }
+
+  /**
+   * Brings saved rounds back. Nobody is connected yet, so every player starts
+   * out as away — their seat, card and host role wait for them from `now` on,
+   * exactly as after a dropped socket. Fields a newer version added get their
+   * defaults; a malformed session is skipped rather than blocking the start.
+   * Returns how many sessions came back.
+   */
+  restore(state: unknown, now = Date.now()): number {
+    if (!state || typeof state !== 'object') return 0;
+    const saved = state as Partial<SavedState>;
+    if (saved.version !== SAVE_VERSION || !Array.isArray(saved.sessions)) return 0;
+
+    let restored = 0;
+    for (const raw of saved.sessions) {
+      try {
+        const players = raw.players.map((p): Player => ({
+          ...newPlayer(p.name),
+          ...p,
+          connected: false,
+          disconnectedAt: now,
+        }));
+        if (players.length === 0 || !Array.isArray(raw.list.words)) continue;
+        const session: Session = {
+          ...raw,
+          shareStamps: raw.shareStamps ?? false,
+          freeCounter: raw.freeCounter ?? false,
+          list: {
+            ...raw.list,
+            numbers: raw.list.numbers ? new Map(raw.list.numbers) : undefined,
+          },
+          players: new Map(players.map((p) => [p.id, p])),
+          order: raw.order.filter((id) => players.some((p) => p.id === id)),
+          touchedAt: now,
+        };
+        this.sessions.set(session.code, session);
+        restored += 1;
+      } catch {
+        /* one broken round must not take the others with it */
+      }
+    }
+    return restored;
+  }
+
   /* ---------------------------------- internals ------------------------------- */
 
   private nameTaken(session: Session, name: string, exceptId?: string): boolean {
@@ -443,6 +555,7 @@ function newPlayer(name: string): Player {
     hasBingo: false,
     bingoAt: null,
     wins: 0,
+    freeCount: 0,
     disconnectedAt: null,
   };
 }

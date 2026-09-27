@@ -18,12 +18,17 @@ RUN npm run build
 FROM base AS runner
 ENV NODE_ENV=production
 ENV PORT=3000
+# Rounds are saved here so a restart doesn't end them — mount a volume on /data.
+ENV STATE_FILE=/data/state.json
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/package.json /app/tsconfig.json /app/next.config.ts /app/server.ts ./
 COPY --from=builder /app/src ./src
 COPY --from=builder /app/public ./public
+
+# A fresh named volume copies this ownership, so the node user can write to it.
+RUN mkdir -p /data && chown node:node /data
 
 USER node
 EXPOSE 3000

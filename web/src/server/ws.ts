@@ -14,6 +14,7 @@ import {
   type WordListInfo,
 } from '../lib/protocol.ts';
 import { Engine, cleanName, normalizeCode, type Session } from './engine.ts';
+import { persistSessions } from './persist.ts';
 import { WORD_LISTS } from './wordlists.ts';
 
 type Bound = { code: string; playerId: string };
@@ -33,8 +34,12 @@ const LISTS: WordListInfo[] = WORD_LISTS.map((l) => ({
   source: 'shared',
 }));
 
-export function attachBingoServer(server: HttpServer): WebSocketServer {
+export function attachBingoServer(
+  server: HttpServer,
+  options: { stateFile?: string } = {},
+): { wss: WebSocketServer; saveNow: () => void } {
   const engine = new Engine();
+  const persistence = persistSessions(engine, options.stateFile);
   // `noServer` + a manual upgrade hook: anything that is not ours (Next's HMR
   // socket in dev, for instance) has to stay untouched.
   const wss = new WebSocketServer({ noServer: true });
@@ -176,6 +181,7 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
           size: typeof message.size === 'number' ? message.size : undefined,
           mode: message.mode,
           shareStamps: message.shareStamps,
+          freeCounter: message.freeCounter,
         });
         if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
         return broadcast(session.code);
@@ -194,6 +200,11 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
       }
       case 'reset': {
         const result = engine.reset(session, playerId);
+        if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
+        return broadcast(session.code);
+      }
+      case 'count': {
+        const result = engine.count(session, playerId, Number(message.delta));
         if (!result.ok) return send(socket, { t: 'error', code: result.code, message: result.message });
         return broadcast(session.code);
       }
@@ -231,7 +242,10 @@ export function attachBingoServer(server: HttpServer): WebSocketServer {
   wss.on('close', () => {
     clearInterval(heartbeat);
     clearInterval(sweeper);
+    persistence.stop();
   });
 
-  return wss;
+  // Shutdown must call this itself: the server's 'close' event only fires once
+  // every socket has finished closing, which is after the process is gone.
+  return { wss, saveNow: persistence.flush };
 }

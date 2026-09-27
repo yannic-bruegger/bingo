@@ -24,6 +24,8 @@ export function BingoCard({
   disabled,
   hints,
   numbers,
+  freeCount,
+  onCount,
 }: {
   card: string[];
   stamps: boolean[];
@@ -35,6 +37,9 @@ export function BingoCard({
   hints?: ReadonlySet<number>;
   /** Per cell, the word's number on lists that have them. */
   numbers?: (number | null)[] | null;
+  /** Set when the round counts taps on the free centre cell. */
+  freeCount?: number | null;
+  onCount?: (delta: 1 | -1) => void;
 }) {
   const winning = useMemo(() => {
     const set = new Set<number>();
@@ -55,6 +60,18 @@ export function BingoCard({
           const hinted = !stamped && !isFree && Boolean(hints?.has(index));
           const number = isFree ? null : (numbers?.[index] ?? null);
           const label = number === null ? word : `${number} ${word}`;
+
+          if (isFree && freeCount !== null && freeCount !== undefined) {
+            return (
+              <FreeCounter
+                key={index}
+                word={word}
+                count={freeCount}
+                size={size}
+                onCount={disabled ? undefined : onCount}
+              />
+            );
+          }
 
           return (
             <button
@@ -93,6 +110,57 @@ export function BingoCard({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/**
+ * The free centre cell as a tally: every tap counts one up, a small minus in
+ * the corner takes a mis-tap back. It stays stamped for bingo purposes.
+ */
+function FreeCounter({
+  word,
+  count,
+  size,
+  onCount,
+}: {
+  word: string;
+  count: number;
+  size: number;
+  onCount?: (delta: 1 | -1) => void;
+}) {
+  return (
+    <div className="relative aspect-square">
+      <button
+        type="button"
+        disabled={!onCount}
+        onClick={() => onCount?.(1)}
+        aria-label={`${word}: ${count} – antippen zählt eins hoch`}
+        className={cx(
+          'flex size-full flex-col items-center justify-center rounded-xl border p-1 text-center',
+          'border-accent/30 bg-accent-soft text-accent transition-transform duration-100',
+          'active:scale-95 disabled:cursor-default disabled:active:scale-100',
+        )}
+        style={{ fontSize: `clamp(0.5rem, ${14 / size}cqw, 1.05rem)` }}
+      >
+        <span className="text-[0.85em] leading-none tracking-wide">{word}</span>
+        <span key={count} className="animate-pop mt-1 font-mono text-[2em] leading-none font-medium tabular-nums">
+          {count}
+        </span>
+      </button>
+      {onCount && count > 0 && (
+        <button
+          type="button"
+          onClick={() => onCount(-1)}
+          aria-label={`${word}: eins zurück`}
+          className={cx(
+            'absolute top-0.5 right-0.5 flex size-6 items-center justify-center rounded-lg',
+            'text-base leading-none text-accent hover:bg-accent/10',
+          )}
+        >
+          −
+        </button>
+      )}
     </div>
   );
 }

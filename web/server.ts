@@ -27,7 +27,8 @@ const server = createServer((req, res) => {
   });
 });
 
-const wss = attachBingoServer(server);
+// Where rounds survive a restart. Unset (e.g. `npm run dev`) keeps them in memory only.
+const { wss, saveNow } = attachBingoServer(server, { stateFile: process.env.STATE_FILE || undefined });
 
 server.listen(port, hostname, () => {
   console.log(`▪ bingo ready on http://localhost:${port}  (ws on /ws)`);
@@ -37,6 +38,8 @@ server.listen(port, hostname, () => {
 // leaves clients hanging on a socket that is accepted but never answered.
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
+    // First, while everything is still in place: the rounds must outlive us.
+    saveNow();
     for (const client of wss.clients) client.terminate();
     wss.close();
     server.closeAllConnections();
